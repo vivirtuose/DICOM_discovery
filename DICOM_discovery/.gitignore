@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# PHI / clinical-data guard: NEVER commit real patient data or generated output.
+# Only code and the SYNTHETIC cohort are versioned.
+# ---------------------------------------------------------------------------
+*.dcm
+*.DCM
+*.ima
+*.IMA
+*.nii
+*.nii.gz
+*.csv
+*.xlsx
+*.xls
+*.html
+
+# Allow the synthetic example cohort (fabricated, no PHI) to be regenerated, not stored.
+examples/
+outputs/
+out/
+report*.html
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments / editors
+.venv/
+venv/
+.env
+.idea/
+.vscode/

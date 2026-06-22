@@ -1,0 +1,16 @@
+# Example completeness protocol: what each patient must have, per timepoint, and the
+# date windows (days from baseline) that define each timepoint. Drives the
+# observed-vs-expected map. Edit per study, or pass via `dicom-discovery completeness --protocol`.
+name: brain_rt_followup
+timepoints: [baseline, M3, M6, M12]
+required:
+  baseline: [CT, MR, RTSTRUCT, RTPLAN, RTDOSE]
+  M3: [MR]
+  M6: [MR]
+  M12: [MR]
+offsets:        # days after baseline
+  baseline: 0
+  M3: 90
+  M6: 180
+  M12: 360
+tolerance_days: 60

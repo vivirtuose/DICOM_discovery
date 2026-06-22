@@ -1,0 +1,5 @@
+# Pinned to the versions this package is developed and tested against (Python 3.8).
+pandas==2.0.3
+pydicom==2.4.4
+plotly==5.24.1
+pytest==8.3.4

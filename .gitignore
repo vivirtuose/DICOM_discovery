@@ -1,0 +1,36 @@
+# --- PHI / clinical data: never commit DICOM or generated outputs ---
+*.dcm
+*.ima
+*.csv
+*.html
+*.pkl
+
+# Generated example cohorts and run artifacts (regenerable via the synthetic generators)
+**/examples/synthetic_cohort/
+**/examples/longitudinal_cohort/
+index_manifest.json
+*_manifest.json
+verdicts*.json
+
+# Local working folders (kept out of the published repo)
+_archive/
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp

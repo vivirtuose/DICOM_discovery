@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "DICOM_discovery"
+version = "0.7.0"
+description = "Cohort-level QC for longitudinal radiotherapy (DICOM-RT) data."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Vivian Metzger" }]
+keywords = ["dicom", "radiotherapy", "data-curation", "quality-control", "oncology"]
+dependencies = [
+    "pandas>=1.3",
+    "pydicom>=2.3",
+    "jsonschema>=4.0",
+]
+
+[project.optional-dependencies]
+viz = ["plotly>=5.0"]
+dev = ["pytest>=7.0", "ruff>=0.4"]
+
+[project.scripts]
+dicom-discovery = "DICOM_discovery.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py38"
+src = ["src", "synth", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+# Target is Python 3.8: keep typing.Dict/List/Optional (UP006/UP045) rather than PEP585/604
+# builtins. E501 (line length) and E702 (intentional compact rows in the synthetic
+# data generators) are allowed.
+ignore = ["E501", "E702", "UP006", "UP035", "UP045"]
