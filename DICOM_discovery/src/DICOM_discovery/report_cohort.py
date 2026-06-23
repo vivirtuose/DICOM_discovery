@@ -249,6 +249,14 @@ def _esc(v) -> str:
     return html.escape(str(v))
 
 
+def _fmt_study_date(raw: str) -> str:
+    """DICOM StudyDate (YYYYMMDD) -> readable YYYY-MM-DD; pass through anything else."""
+    raw = (raw or "").strip()
+    if len(raw) == 8 and raw.isdigit():
+        return f"{raw[0:4]}-{raw[4:6]}-{raw[6:8]}"
+    return raw or "undated"
+
+
 # The data-presence strip: the report's one signature element. A single compact row of
 # seven cells — the RT chain (CT · STR · PLAN · DOSE) followed by the target volumes
 # (GTV · CTV · PTV) — that shows at a glance which pieces of a patient's RT record exist.
@@ -386,14 +394,29 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]]) -> str:
                         f"<span class='badge conf'>{_esc(f['confidence'] or '—')}</span>"
                         f"<span class='ftext'>{_esc(f['text'])}</span></li>"
                     )
-                findings_block = (f"<ul class='findings'>{''.join(fitems)}</ul>"
-                                  if fitems else "<p class='dim'>no findings — chain resolves cleanly</p>")
+                date = _fmt_study_date(s["study_date"])
+                is_rt = s["rt_status"] != "NOT_RT"
+                if is_rt:
+                    n = s["n_roi"]
+                    structs = f"{n} structure" if n == 1 else f"{n} structures"
+                    type_label = f"contains RT · {structs}"
+                    if fitems:
+                        body_html = f"<ul class='findings'>{''.join(fitems)}</ul>"
+                    elif s["rt_status"] == "OK":
+                        body_html = "<p class='ok-note'>✓ RT chain complete — no anomalies.</p>"
+                    else:
+                        body_html = "<p class='dim'>No per-study findings recorded.</p>"
+                    study_cls = "study"
+                else:
+                    # An imaging-only study (follow-up MR/CT): no RT object, nothing to check.
+                    type_label = "imaging only · no RT object"
+                    body_html = "<p class='dim'>Nothing to check (no RT object).</p>"
+                    study_cls = "study study-nort"
                 detail_html.append(
-                    f"<div class='study'><div class='study-head'>"
-                    f"<span class='mono'>{_esc(s['study_date']) or 'undated'}</span>"
-                    f"{_verdict_pill(s['rt_status'])}"
-                    f"<span class='dim mono'>{s['n_roi']} ROI</span></div>"
-                    f"{findings_block}</div>"
+                    f"<div class='{study_cls}'><div class='study-head'>"
+                    f"<span class='mono study-date'>{_esc(date)}</span>"
+                    f"<span class='study-type'>{type_label}</span></div>"
+                    f"{body_html}</div>"
                 )
             # Drill-down opens with a recap: the verdict, the full data-presence strip, and
             # the recommended action — then the per-study findings beneath it.
@@ -642,7 +665,13 @@ main{max-width:1240px;margin:0 auto;padding:26px 30px 48px}
   text-transform:uppercase;margin-bottom:12px}
 .study{padding:11px 0;border-top:1px solid var(--line)}
 .study:first-of-type{border-top:none;padding-top:2px}
-.study-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12.5px}
+.study-head{display:flex;align-items:baseline;gap:12px;margin-bottom:6px;font-size:12.5px}
+.study-date{font-weight:600;color:var(--ink)}
+.study-type{color:var(--muted);font-size:12px}
+/* Imaging-only studies (no RT object) are de-emphasised — informational, not actionable. */
+.study-nort{opacity:.7}
+.study-nort .study-date{color:var(--muted)}
+.ok-note{color:#43684f;font-size:12.5px}
 .findings{list-style:none;display:flex;flex-direction:column;gap:7px}
 .findings li{display:flex;align-items:baseline;gap:8px;font-size:12.5px}
 .badge{font-size:10px;font-weight:600;padding:1px 7px;border-radius:var(--radius-sm);flex:none}
