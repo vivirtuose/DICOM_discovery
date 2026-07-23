@@ -1,6 +1,7 @@
 """Shared fixtures: build the synthetic cohorts once and index/assess them."""
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -33,3 +34,27 @@ def longitudinal(tmp_path_factory):
     out = tmp_path_factory.mktemp("longitudinal_cohort")
     generate_longitudinal_cohort(str(out))
     return str(out), build_index(str(out))
+
+
+# Tier 2a — REAL DICOM-RT data (offline). pydicom ships three genuine, vendor-authored RT
+# objects; using them proves the indexer/parser survives real-world headers, not only our
+# synthetic cohort. They come from different sources (unlinked), which is exactly what makes
+# them a good robustness probe.
+_PYDICOM_RT_FILES = ("rtplan.dcm", "rtstruct.dcm", "rtdose.dcm")
+
+
+@pytest.fixture(scope="session")
+def pydicom_rt_dir(tmp_path_factory):
+    """A directory containing pydicom's three bundled real RT objects (offline)."""
+    from pydicom.data import get_testdata_file
+
+    out = tmp_path_factory.mktemp("pydicom_rt")
+    for name in _PYDICOM_RT_FILES:
+        try:
+            src = get_testdata_file(name)
+        except Exception:
+            src = None
+        if not src or not Path(src).exists():
+            pytest.skip(f"pydicom bundled RT file {name} unavailable")
+        shutil.copy(src, out / name)
+    return out
