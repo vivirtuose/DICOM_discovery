@@ -23,6 +23,43 @@ the matrix).
   patients carry a complete chain. It is **brain radiosurgery** data, directly aligned with the
   tool's brain-RT focus.)
 
+## Council review — ratified modifications (2026-07-23)
+
+Reviewed via the **llm-council** 3-stage protocol (Karpathy) — members Opus 4.8 / Sonnet / Haiku,
+independent first opinions → anonymized peer ranking → chair synthesis. Aggregate ranking put
+Sonnet 1st, Opus 2nd, Haiku 3rd; unanimous **APPROVE-WITH-CHANGES**. Final chair ruling:
+**PROCEED-WITH-MODIFICATIONS**. The following are now binding on implementation:
+
+- **[Grading — maintainer-ratified code change]** The rollup hardcodes "no CT → WARN +
+  `récupérer le CT de planification`" (`rt_integrity.py:354-356`), and `build_rt_rollup` takes **no
+  protocol argument** (only completeness is protocol-configurable) — so a `--protocol` YAML canNOT
+  fix it. Make `build_rt_rollup` **MR-planning-aware**: when the planning image resolved through the
+  chain is an MR (not CT) and the STRUCT→PLAN→DOSE chain resolves, do **not** cap to WARN with a
+  "retrieve the CT" action. This makes the real-data showcase a correct verdict and improves the
+  tool for genuine MR-planned radiosurgery. Covered by new tests; CT-based expectations preserved.
+- **[T2b assertions]** Assert on the **actual** rollup columns (`rt_status`, `has_RTSTRUCT/RTPLAN/
+  RTDOSE`, `reason`) and link behavior — **never** `rt_status == OK` as a blanket, and **not**
+  GTV/CTV/PTV presence (VS ROIs are "Tumour"/"TV", so the target substring match legitimately
+  reads absent). `plan_links_struct`/`dose_links_plan` do **not** exist in the `src/` rollup (only
+  in the legacy `file_discovery/` copy) — do not assert on them.
+- **[Fetch hardening]** stdlib `urllib` with an explicit **socket timeout and total timeout**, a
+  small retry/backoff, and a broadened catch (`URLError`/`HTTPError`/timeout) so a *degraded-but-
+  reachable* endpoint **skips, never hangs**.
+- **[Cache integrity]** A SHA-256 mismatch on cached/restored files must **`pytest.skip` loudly, not
+  fail** (TCIA re-de-identification changes bytes while SeriesInstanceUIDs stay stable). Verify
+  hashes against **cache-restored** files, not only fresh downloads; fold the `provenance.json` hash
+  into the `actions/cache` key.
+- **[Governance]** Pin the **exact** citations now: Shapey et al. 2021 (dataset) **and** Clark et
+  al. 2013 (TCIA infrastructure), per TCIA's Data Usage Policy. Add a CI gate that **fails if any
+  `*.dcm` is tracked** (`git ls-files | grep -i '\.dcm$'`) — `.gitignore` is a convention, not a
+  barrier.
+- **[Workflow isolation]** T3 lives in its **own workflow file** with its own
+  `on: workflow_dispatch + schedule` — `ci.yml`'s top-level `on: push/pull_request` governs the
+  whole file, so gating only a job still registers a run on every push.
+- **[Overruled]** A per-push offline "T2c" synthetic linked-chain test — **redundant**: T1 already
+  exercises STRUCT→PLAN→DOSE resolution offline every push with ground truth.
+- **[Sequencing]** Land T1 + T2a + the MR-aware grading change first (all offline); then T2b/T3.
+
 ## The four tiers
 
 | Tier | Data | Runs | Proves |
