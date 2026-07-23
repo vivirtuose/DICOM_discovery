@@ -1,0 +1,74 @@
+name: CI
+
+# The Python package lives in the DICOM_discovery/ subdirectory of this repo, so every
+# run step executes there via the working-directory default. Synthetic data only — no PHI
+# ever reaches CI (the test suite and the proof job synthesise their own DICOM).
+on:
+  push:
+  pull_request:
+
+defaults:
+  run:
+    working-directory: DICOM_discovery
+
+jobs:
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package (with dev extras)
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check src synth tests
+
+      - name: Test (pytest)
+        run: pytest
+
+  proof:
+    # Proof-of-work: build the tool from a clean install, synthesise an open cohort, and run
+    # the real report + verdict-JSON pipeline end-to-end. The artifacts are the evidence the
+    # package works — downloadable from the run summary. No PHI: the cohort is generated here.
+    name: proof-of-work (synthetic cohort)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package (one-command install path)
+        run: pip install -e .
+
+      - name: Generate synthetic longitudinal cohort (no PHI — synthesised here)
+        run: python synth/generate_longitudinal_cohort.py --out-dir examples/longitudinal_cohort
+
+      - name: Run the real report + verdict pipeline
+        run: >
+          dicom-discovery report
+          --root examples/longitudinal_cohort
+          --out cohort_report.html
+          --json verdicts.json
+
+      - name: Upload proof-of-work artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-cohort-report
+          path: |
+            DICOM_discovery/cohort_report.html
+            DICOM_discovery/verdicts.json
+          if-no-files-found: error
