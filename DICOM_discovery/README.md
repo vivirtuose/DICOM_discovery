@@ -1,5 +1,10 @@
 # DICOM_discovery
 
+[![CI](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml/badge.svg)](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.9%E2%80%933.13-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Use: research-only](https://img.shields.io/badge/use-research--only-orange)
+
 **Cohort-level quality control for longitudinal radiotherapy (DICOM-RT) data.**
 
 Before any radiomics or dose–outcome study can run, someone has to prove the cohort is
@@ -23,6 +28,23 @@ patient/study/timepoint identity comes from DICOM tags, not folder positions, an
 works the same on a tidy export, a flat dump, or a different hospital's layout. DICOM files
 are detected by **content** (the `DICM` preamble / a parseable SOPClassUID), not by a
 `.dcm` extension — real exports are often extensionless.
+
+---
+
+## Install
+
+Runs on **Python 3.9–3.13** (Linux / macOS / Windows). One command, straight from GitHub —
+no clone needed (the package lives in the `DICOM_discovery/` subdirectory of the repo):
+
+```bash
+pip install "git+https://github.com/vivirtuose/DICOM_discovery.git#subdirectory=DICOM_discovery"
+
+dicom-discovery --help
+```
+
+The interactive Plotly report is a **core dependency**, so `dicom-discovery report` works out
+of the box — there is no separate visualisation step to install. For development, clone the
+repo and use an editable install with the test extras (`pip install -e ".[dev]"`).
 
 ---
 
@@ -209,5 +231,5 @@ src/DICOM_discovery/
     cli.py / __main__.py # `dicom-discovery` commands: demo / index / rt-check / completeness / report
     synthetic.py         # synthetic DICOM-RT + longitudinal cohorts (+ ground truth)
 protocol.brain_rt_followup.yaml       # example expected-content protocol
-tests/                                # pytest suite (87 tests), driven by the synthetic cohorts
+tests/                                # pytest suite (140 tests), driven by the synthetic cohorts
 ```

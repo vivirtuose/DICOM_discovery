@@ -1,6 +1,17 @@
 # DICOM Discovery — EpiBrainRad
 
+[![CI](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml/badge.svg)](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.9%E2%80%933.13-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Use: research-only](https://img.shields.io/badge/use-research--only-orange)
+
 Dépôt regroupant les deux générations d'outils de découverte et de QC des fichiers DICOM RT de la cohorte EpiBrainRad.
+
+> **Preuve de fonctionnement (proof-of-work).** La CI teste `DICOM_discovery` sur Python
+> 3.9→3.13, puis génère une **cohorte DICOM-RT synthétique** (aucune donnée patient) et exécute
+> le vrai pipeline `report --json` de bout en bout ; le rapport HTML autonome et le
+> `verdicts.json` produits sont téléversés comme **artefacts téléchargeables** de chaque run
+> CI. Voir l'onglet *Actions* → job *proof-of-work*.
 
 ## Structure du dépôt
 
@@ -55,7 +66,7 @@ python file_discovery_runner.py \
 
 ## `DICOM_discovery/` — Version en développement
 
-Package Python structuré (`src/` layout), versionné, avec tests automatisés (144 tests, pytest) et CLI installable via `pip install -e .`.
+Package Python structuré (`src/` layout), versionné, compatible **Python 3.9→3.13**, avec tests automatisés (140 tests, pytest) et CLI installable en **une commande**.
 
 **Fonctionnalités ajoutées par rapport à `file_discovery/` :**
 - Index DICOM par tags (PatientID, Modality, SeriesInstanceUID)
@@ -64,12 +75,14 @@ Package Python structuré (`src/` layout), versionné, avec tests automatisés (
 - Rapport de cohorte HTML interactif (timeline, KPI cliniques)
 - CLI `dicom-discovery` avec sous-commandes `index`, `rt-check`, `report`, `completeness`
 
-**Installation :**
+**Installation (une commande, directement depuis GitHub) :**
 
 ```bash
-cd DICOM_discovery
-pip install -e .
+pip install "git+https://github.com/vivirtuose/DICOM_discovery.git#subdirectory=DICOM_discovery"
 ```
+
+Le rapport interactif (Plotly) est une dépendance de base : `dicom-discovery report` fonctionne
+sans étape supplémentaire. Pour le développement : `cd DICOM_discovery && pip install -e ".[dev]"`.
 
 **Usage rapide :**
 
@@ -113,6 +126,8 @@ Ces dossiers sont conservés pour référence historique. Ne pas réutiliser.
 
 ## Environnement
 
-- Python 3.8 (`file_discovery/`, `DICOM_discovery/`)
-- Conda env : `epibrainrad`
-- Accès NAS requis pour les runs sur données réelles : `/mnt/NAS2418_RADT/`
+- `DICOM_discovery/` : **Python 3.9→3.13**, testé en CI sur toute la matrice. Installation via
+  un simple `venv` + `pip` (aucun environnement Conda requis).
+- `file_discovery/` : version historique, Python 3.8 (production NAS).
+- Accès NAS requis uniquement pour les runs sur données réelles : `/mnt/NAS2418_RADT/`. Les
+  tests et la démo n'utilisent que des données **synthétiques** (aucune donnée patient).
