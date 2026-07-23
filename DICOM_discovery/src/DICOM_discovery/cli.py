@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from pathlib import Path
 
 from .completeness import (
@@ -241,7 +242,27 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _force_utf8_stdio() -> None:
+    """Make stdout/stderr tolerate the report's Unicode box-drawing/arrow characters.
+
+    On Windows the default console encoding (e.g. cp1252) cannot encode the preflight's
+    box-drawing characters, which would crash an otherwise-successful run at print time.
+    Reconfiguring the streams to UTF-8 keeps the tool portable across environments; it is a
+    harmless no-op where stdout is already UTF-8 (Linux/macOS/CI) or where the stream cannot
+    be reconfigured (e.g. a capture wrapper that lacks ``reconfigure``).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (ValueError, OSError):
+            pass
+
+
 def main(argv=None) -> int:
+    _force_utf8_stdio()
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")
