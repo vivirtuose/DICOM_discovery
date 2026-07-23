@@ -58,3 +58,29 @@ def pydicom_rt_dir(tmp_path_factory):
             pytest.skip(f"pydicom bundled RT file {name} unavailable")
         shutil.copy(src, out / name)
     return out
+
+
+# Tier 2b — one REAL, linked RT chain fetched from TCIA (Vestibular-Schwannoma-SEG, MR-based
+# brain radiosurgery). Cached under tests/.cache/ (gitignored) and pinned by SHA-256. The
+# fixture SKIPS (never fails) when the network is unavailable, or when a cached file's hash no
+# longer matches provenance (e.g. TCIA re-ran de-identification) — preserving the never-fail
+# contract for the per-push tier.
+@pytest.fixture(scope="session")
+def real_rt_chain_dir():
+    """Path to a cached real VS-SEG-001 RTSTRUCT/RTPLAN/RTDOSE chain, or skip if unavailable."""
+    bench = _ROOT / "bench"
+    if str(bench) not in sys.path:
+        sys.path.insert(0, str(bench))
+    from fetch_public_cohort import PROVENANCE_NAME, FetchError, fetch_cohort, verify
+
+    cache = _ROOT / "tests" / ".cache" / "vs_seg_chain"
+    if (cache / PROVENANCE_NAME).exists():
+        if verify(str(cache)):
+            return cache
+        pytest.skip("cached real RT chain failed SHA-256 verification (TCIA re-de-identification?)")
+    try:
+        fetch_cohort("Vestibular-Schwannoma-SEG", str(cache),
+                     patient_id="VS-SEG-001", rt_only=True, timeout=60.0)
+    except FetchError as e:
+        pytest.skip(f"TCIA unavailable — skipping real-data tier: {e}")
+    return cache

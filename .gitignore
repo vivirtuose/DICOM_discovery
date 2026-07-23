@@ -34,6 +34,10 @@ htmlcov/
 venv/
 env/
 
+# Cached real-data fetches for the test tiers (regenerable; never commit real DICOM)
+**/.cache/
+provenance.json
+
 # Local dev tooling (Claude Code / superpowers) — not part of the package deliverable
 .agents/
 .claude/

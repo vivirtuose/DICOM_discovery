@@ -36,3 +36,28 @@ def test_real_rt_objects_graded_without_crashing(pydicom_rt_dir):
     assert set(rollup["rt_status"]) == {"INCOMPLETE"}
     assert not study.empty
     assert set(study["rt_status"]) == {"INCOMPLETE"}
+
+
+# --------------------------------------------------------------------------- #
+# Tier 2b — one REAL linked chain fetched from TCIA (skips cleanly when offline)
+# --------------------------------------------------------------------------- #
+def test_real_linked_chain_resolves(real_rt_chain_dir):
+    """The STRUCT->PLAN->DOSE chain of a real MR-planned patient resolves via referenced UIDs.
+
+    Assertions target link resolution and real behavior — NOT rt_status == OK and NOT GTV/CTV/PTV
+    presence: Vestibular-Schwannoma structure sets legitimately name the target "Tumour"/"TV",
+    and only the RT objects (no MR) are fetched, so a WARN verdict is expected and correct. The
+    MR-aware grading means the reason must NOT be the old "planning CT" remediation.
+    """
+    idx = build_index(str(real_rt_chain_dir))
+    table = idx.table
+    assert idx.manifest["n_dicom_indexed"] >= 3
+    assert {"RTSTRUCT", "RTPLAN", "RTDOSE"} <= set(table["modality"])
+
+    study = build_rt_integrity(table)
+    assert study["plan_links_struct"].all(), "RTPLAN->RTSTRUCT link should resolve on real data"
+    assert study["dose_links_plan"].all(), "RTDOSE->RTPLAN link should resolve on real data"
+
+    rollup = build_rt_rollup(table).iloc[0]
+    assert rollup["rt_status"] in {"OK", "WARN"}          # coherent, never a crash
+    assert "planning CT" not in rollup["reason"]          # MR-aware: no wrong 'retrieve the CT'
