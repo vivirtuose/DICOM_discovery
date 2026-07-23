@@ -101,7 +101,7 @@ def build_verdict_payload(
         "schema_version": SCHEMA_VERSION,
         "tool": "DICOM_discovery",
         "tool_version": __version__,
-        "generated_utc": datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "protocol": protocol_name,
         "run": run,
         "patients": [_patient_entry(r) for r in rows],

@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "DICOM_discovery"
-version = "0.7.0"
+version = "0.8.0"
 description = "Cohort-level QC for longitudinal radiotherapy (DICOM-RT) data."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Vivian Metzger" }]
 keywords = ["dicom", "radiotherapy", "data-curation", "quality-control", "oncology"]
@@ -16,10 +16,10 @@ dependencies = [
     "pydicom>=2.3",
     "jsonschema>=4.0",
     "pyyaml>=5.1",
+    "plotly>=5.0",
 ]
 
 [project.optional-dependencies]
-viz = ["plotly>=5.0"]
 dev = ["pytest>=7.0", "ruff>=0.4"]
 
 [project.scripts]
@@ -31,15 +31,24 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# The synthetic generators deliberately use the pydicom write API that is valid on BOTH
+# pydicom 2.4 (the only line that supports Python 3.9) and pydicom 3.x. pydicom 3.x warns
+# that this API is slated for removal in 4.0; that migration is blocked until the 3.9 leg is
+# dropped, so these three known DeprecationWarnings are silenced as expected noise.
+filterwarnings = [
+    "ignore:.*is_little_endian.*:DeprecationWarning",
+    "ignore:.*is_implicit_VR.*:DeprecationWarning",
+    "ignore:.*write_like_original.*:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 110
-target-version = "py38"
+target-version = "py39"
 src = ["src", "synth", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
-# Target is Python 3.8: keep typing.Dict/List/Optional (UP006/UP045) rather than PEP585/604
-# builtins. E501 (line length) and E702 (intentional compact rows in the synthetic
-# data generators) are allowed.
+# Minimum target is Python 3.9: keep typing.Dict/List/Optional (UP006/UP045) rather than
+# PEP585/604 builtins so the annotations stay valid on the whole 3.9-3.13 matrix. E501 (line
+# length) and E702 (intentional compact rows in the synthetic data generators) are allowed.
 ignore = ["E501", "E702", "UP006", "UP035", "UP045"]

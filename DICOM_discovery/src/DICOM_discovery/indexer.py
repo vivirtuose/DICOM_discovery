@@ -402,7 +402,7 @@ def build_index(root: str, patient_regexes: Optional[List[str]] = None,
 
     manifest = {
         "tool": "DICOM_discovery",
-        "generated_utc": datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "root": str(root_path),
         "group_by": group_by,
         "patient_regexes": list(patient_regexes or []),
