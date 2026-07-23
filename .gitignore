@@ -29,6 +29,16 @@ dist/
 .coverage
 htmlcov/
 
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local dev tooling (Claude Code / superpowers) — not part of the package deliverable
+.agents/
+.claude/
+skills-lock.json
+
 # Editors / OS
 .vscode/
 .idea/

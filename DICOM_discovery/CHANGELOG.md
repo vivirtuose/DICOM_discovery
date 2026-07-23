@@ -4,6 +4,26 @@ All notable changes to **DICOM_discovery**. The package began as a single-instit
 data-curation script and was rebuilt, in council-reviewed increments, into an adaptive
 cohort-QC tool.
 
+## 0.8.0 — multi-Python packaging + synthetic-data CI proof-of-work (2026-07-23)
+Makes the package portable, installable in one command, and self-proving in CI. RUO throughout.
+- **Runs on Python 3.9–3.13.** `requires-python` raised to `>=3.9` (EOL 3.8 dropped); ruff
+  target `py39`. Deprecated `datetime.utcnow()` replaced with timezone-aware UTC (identical
+  `…SSZ` manifest/verdict timestamp). The synthetic generators keep the pydicom write API valid
+  on **both** pydicom 2.4 (the only line supporting 3.9) and 3.x; the three pydicom-4.0-removal
+  `DeprecationWarning`s are silenced as expected noise (full 4.0 migration deferred until 3.9 is
+  dropped).
+- **One-command install:** `pip install "git+https://github.com/vivirtuose/DICOM_discovery.git#subdirectory=DICOM_discovery"`.
+  `plotly` is now a **core dependency** (was the optional `[viz]` extra), so the headline HTML
+  report works out of the box. **PyYAML** is now correctly declared — `load_protocol()` imported
+  it without declaring it, so a clean install failed on the protocol path.
+- **Windows-safe CLI:** `main()` reconfigures stdout/stderr to UTF-8, so the preflight's
+  box-drawing output no longer crashes an otherwise-successful `report` on a cp1252 console.
+- **CI matrix + proof-of-work.** The workflow (moved from a nested, never-discovered path to the
+  repo root) tests the whole 3.9–3.13 matrix on Ubuntu, then a `proof` job installs from clean,
+  synthesises an **open** longitudinal cohort (no PHI), runs the real `report --json` pipeline,
+  and uploads the self-contained HTML + verdict JSON as downloadable artifacts. 140 tests; `ruff`
+  clean.
+
 ## 0.7.0 — versioned verdict contract, actionable registry, TG-263 (council 2026-06-18)
 Decided by LLM council + maintainer. Reframes the output from "a package that emits HTML"
 toward a tool whose verdict is a reusable, reproducible artifact; the HTML report becomes a

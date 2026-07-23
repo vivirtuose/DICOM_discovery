@@ -1,0 +1,10 @@
+# Normalize line endings to LF in the repo so the package is byte-identical across
+# Windows / macOS / Linux checkouts (this is a multi-OS package).
+* text=auto eol=lf
+
+# Binary assets — never touch line endings.
+*.dcm binary
+*.ima binary
+*.png binary
+*.jpg binary
+*.pkl binary
