@@ -171,11 +171,17 @@ def assess_patient(patient_id: str, objects: Sequence[RTObject]) -> Tuple[Status
         if not by_mod.get(mod):
             findings.append(Finding(f"MISSING_{mod}", Severity.ERROR, Confidence.HIGH,
                                     f"no {mod} object found for this study"))
-    if not cts:
-        findings.append(Finding("MISSING_CT", Severity.WARNING, Confidence.HIGH,
-                                "no planning CT found (it may live in a separate archive)"))
 
     rt_fors = {o.frame_of_reference for o in structs + doses + plans if o.frame_of_reference}
+
+    # Planning image: CT is typical, but MR-based planning (e.g. brain radiosurgery) is valid.
+    # Accept a CT *or* an MR sharing the RT frame of reference; only warn when neither is present.
+    mrs = by_mod.get("MR", [])
+    mr_planning = any(m.frame_of_reference in rt_fors for m in mrs) if rt_fors else bool(mrs)
+    if not cts and not mr_planning:
+        findings.append(Finding("MISSING_PLANNING_IMAGE", Severity.WARNING, Confidence.HIGH,
+                                "no planning image (CT or MR) found (it may live in a separate archive)"))
+
     if len(rt_fors) > 1:
         findings.append(Finding("FOR_INCONSISTENT_RT", Severity.ERROR, Confidence.HIGH,
                                 f"RT objects span {len(rt_fors)} distinct FrameOfReferenceUID values"))
@@ -312,6 +318,7 @@ def build_rt_rollup(table: pd.DataFrame) -> pd.DataFrame:
         doses = [o for o in objs if o.modality == "RTDOSE"]
         plans = [o for o in objs if o.modality == "RTPLAN"]
         cts = [o for o in objs if o.modality == "CT"]
+        mrs = [o for o in objs if o.modality == "MR"]
         rt_objs = structs + doses + plans
         n_studies = grp["study_uid"].fillna("").nunique()
 
@@ -351,9 +358,15 @@ def build_rt_rollup(table: pd.DataFrame) -> pd.DataFrame:
             status = Status.WARN
             reasons.append("RT objects present but reference link does not resolve")
             actions.append("vérifier le lien de référence (plan→struct / dose→plan)")
-        if not cts and status != Status.INCOMPLETE:
-            status = _worse(status, Status.WARN); reasons.append("no planning CT")
-            actions.append("récupérer le CT de planification")
+        # Planning image: CT is typical, but MR-based planning (e.g. brain radiosurgery) is
+        # valid. Accept a CT *or* an MR that shares the RT frame of reference as the planning
+        # image; only flag when neither is present (a follow-up MR on a different FoR does not
+        # count). This avoids mis-scoring MR-planned chains as "no planning CT".
+        rt_fors = {o.frame_of_reference for o in rt_objs if o.frame_of_reference}
+        mr_planning = any(m.frame_of_reference in rt_fors for m in mrs) if rt_fors else bool(mrs)
+        if not cts and not mr_planning and status != Status.INCOMPLETE:
+            status = _worse(status, Status.WARN); reasons.append("no planning image (CT/MR)")
+            actions.append("récupérer l'image de planification (CT/MR)")
         if within_study_for_bad:
             status = _worse(status, Status.WARN); reasons.append("inconsistent FrameOfReference within a study")
             actions.append("vérifier le repère (FrameOfReference)")
