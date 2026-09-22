@@ -23,6 +23,17 @@ Makes the package portable, installable in one command, and self-proving in CI. 
   synthesises an **open** longitudinal cohort (no PHI), runs the real `report --json` pipeline,
   and uploads the self-contained HTML + verdict JSON as downloadable artifacts. 140 tests; `ruff`
   clean.
+- **MR-based planning is valid.** The RT grading no longer demands a planning *CT*: a CT **or**
+  an MR sharing the RT frame of reference counts as the planning image (brain radiosurgery is
+  routinely MR-planned). The finding is renamed `MISSING_CT` → `MISSING_PLANNING_IMAGE` and the
+  remediation reads "récupérer l'image de planification (CT/MR)".
+- **Real-data test tiers (objective 3).** T2a: pydicom's three bundled, vendor-authored RT
+  objects are indexed and graded offline on every push. T2b: one real linked
+  RTSTRUCT→RTPLAN→RTDOSE chain (TCIA *Vestibular-Schwannoma-SEG*, CC BY 4.0) is fetched by
+  `bench/fetch_public_cohort.py` (stdlib only), pinned by SHA-256, cached in CI, and **skips —
+  never fails — when TCIA is unreachable**. T3: an opt-in `real-cohort.yml` workflow
+  (`workflow_dispatch` + weekly) runs the real report on a small public cohort and uploads it.
+  A `no-dicom-in-git` CI gate fails the build if any `*.dcm`/`*.ima` is ever tracked. 147 tests.
 
 ## 0.7.0 — versioned verdict contract, actionable registry, TG-263 (council 2026-06-18)
 Decided by LLM council + maintainer. Reframes the output from "a package that emits HTML"

@@ -1,0 +1,49 @@
+name: Real-cohort proof (TCIA)
+
+# Tier 3 — opt-in only. NEVER runs on push/PR (that is what a separate workflow file buys us:
+# a job merely gated inside ci.yml would still register a run on every push). Fetches a small,
+# public, de-identified TCIA cohort (Vestibular-Schwannoma-SEG, CC BY 4.0 — cite Shapey et al.
+# 2021 and Clark et al. 2013), runs the real report + verdict pipeline on genuine RT data, and
+# uploads the results as downloadable artifacts. No PHI.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+
+defaults:
+  run:
+    working-directory: DICOM_discovery
+
+jobs:
+  real-cohort:
+    name: real-cohort proof-of-work
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package (one-command install path)
+        run: pip install -e .
+
+      - name: Fetch a small real cohort (MR + RT; public, de-identified — no PHI)
+        run: python bench/fetch_public_cohort.py --patients 2 --out-dir examples/real_cohort
+
+      - name: Run the real report + verdict pipeline on genuine RT data
+        run: >
+          dicom-discovery report
+          --root examples/real_cohort
+          --out real_cohort_report.html
+          --json real_verdicts.json
+
+      - name: Upload real-cohort artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-cohort-report
+          path: |
+            DICOM_discovery/real_cohort_report.html
+            DICOM_discovery/real_verdicts.json
+          if-no-files-found: error

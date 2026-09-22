@@ -1,8 +1,11 @@
 name: CI
 
 # The Python package lives in the DICOM_discovery/ subdirectory of this repo, so every
-# run step executes there via the working-directory default. Synthetic data only — no PHI
-# ever reaches CI (the test suite and the proof job synthesise their own DICOM).
+# run step executes there via the working-directory default. No PHI ever reaches CI: the
+# synthetic tiers generate their own DICOM, the real-data tier (T2b) fetches a public,
+# de-identified TCIA chain that is cached and skips when unavailable, and a dedicated job
+# fails the build if any DICOM file is ever tracked in git. Full real-cohort runs live in a
+# separate, opt-in workflow (real-cohort.yml), never on push/PR.
 on:
   push:
   pull_request:
@@ -31,10 +34,35 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Lint (ruff)
-        run: ruff check src synth tests
+        run: ruff check src synth tests bench
+
+      # Cache the public TCIA chain (tier 2b) across the matrix so we hit the network at most
+      # once; a cache miss + unreachable TCIA makes the tier skip, never fail.
+      - name: Cache real-data RT chain (TCIA, public)
+        uses: actions/cache@v4
+        with:
+          path: DICOM_discovery/tests/.cache
+          key: vs-seg-001-rtchain-v1
 
       - name: Test (pytest)
         run: pytest
+
+  no-dicom-in-git:
+    # Governance gate: .gitignore is a convention, not a barrier (git add -f bypasses it).
+    # Fail hard if any DICOM file is ever tracked, so real/PHI data can't slip into history.
+    name: no DICOM tracked in git
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if any *.dcm / *.ima is tracked
+        run: |
+          if git ls-files | grep -iE '\.(dcm|ima)$'; then
+            echo "::error::DICOM files must never be committed to this repository"; exit 1
+          fi
+          echo "OK: no tracked DICOM files"
 
   proof:
     # Proof-of-work: build the tool from a clean install, synthesise an open cohort, and run
