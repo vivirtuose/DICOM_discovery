@@ -4,6 +4,33 @@ All notable changes to **DICOM_discovery**. The package began as a single-instit
 data-curation script and was rebuilt, in council-reviewed increments, into an adaptive
 cohort-QC tool.
 
+## 0.9.0 — runs unattended on a hospital NAS (2026-09-22)
+Makes the tool deployable on an air-gapped hospital NAS (or a server mounting one) and safe to
+schedule. RUO throughout.
+- **`dicom-discovery job`** — the scheduled run: one timestamped folder per run (report,
+  verdict JSON, CSVs, index manifest, `run.log`); `latest/` mirrors the last usable run with
+  atomic per-file replaces; PHI-free `last_run.json` for monitoring; overlap lock with
+  stale-lock takeover; retention (`--keep`); index cache on by default; never writes into the
+  scanned tree. Exit codes 0 ok · 1 no DICOM · 2 error · 3 partial scan · 75 locked.
+- **NAS-aware indexer.** Recycle bins, snapshots and thumbnail stores (Synology `#recycle`/
+  `#snapshot`/`@eaDir`, QNAP `@Recycle`/`@Recently-Snapshot`, NetApp `.snapshot`,
+  `$RECYCLE.BIN`, macOS litter) are pruned — a deleted patient no longer reappears through
+  the recycle bin; `--exclude-dir` adds site patterns. Directories that cannot be listed are
+  reported (`n_dirs_unreadable`, `PARTIAL` in the preflight and the report header) instead
+  of `os.walk`'s silent skip. AppleDouble `._*.dcm` files are no longer counted unreadable.
+- **Bounded memory on ~1M-file shares.** Header reads stream through a bounded window
+  (`Executor.map` queued every path up front: ~2 GB measured per million files); series-level
+  UIDs are interned (~1.3 → ~0.9 GB per million records); series collapse before copying.
+- **Linear cache I/O.** Cache checkpoints at doubling intervals instead of a full rewrite every
+  5000 files (quadratic on ~1M files). Cache and all outputs are written atomically (temp +
+  fsync + rename), so a killed run or a dropped share never leaves a truncated file.
+- **Deployment.** Hardened `Dockerfile` (non-root, read-only-rootfs compatible, default
+  command = `job`); `deploy/nas/` with a Synology/QNAP `docker-compose.yml` (no network,
+  read-only DICOM mount, capped RAM/CPU), `.env.example`, an offline `install-offline.sh`
+  and systemd timer units; French guide `docs/NAS_DEPLOYMENT.md`. New **NAS bundle** CI
+  workflow builds the image (amd64 + arm64), smoke-tests it under NAS constraints and uploads
+  `docker load`-able tarballs plus offline wheelhouses for Python 3.9–3.13. 180 tests.
+
 ## 0.8.0 — multi-Python packaging + synthetic-data CI proof-of-work (2026-07-23)
 Makes the package portable, installable in one command, and self-proving in CI. RUO throughout.
 - **Runs on Python 3.9–3.13.** `requires-python` raised to `>=3.9` (EOL 3.8 dropped); ruff

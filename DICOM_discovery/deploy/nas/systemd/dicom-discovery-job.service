@@ -1,0 +1,26 @@
+# Linux server that mounts the NAS share (e.g. /mnt/NAS2418_RADT) — nightly cohort QC run.
+# Install: copy both units to /etc/systemd/system/, adapt paths/User, then
+#   systemctl daemon-reload && systemctl enable --now dicom-discovery-job.timer
+[Unit]
+Description=DICOM_discovery scheduled cohort QC run (Research Use Only)
+# Do not start before the share is mounted; a missing mount would be reported as no DICOM.
+RequiresMountsFor=/mnt/NAS2418_RADT
+After=network-online.target remote-fs.target
+
+[Service]
+Type=oneshot
+User=dicomqc
+Group=dicomqc
+ExecStart=/opt/dicom-discovery/venv/bin/dicom-discovery job \
+    --root /mnt/NAS2418_RADT/datasets/clinical_trials/RADIO-AIDE_full/DICOM \
+    --output-dir /srv/dicom-discovery \
+    --group-by folder --workers 8 --keep 30
+# Any non-zero exit (1 no DICOM, 2 error, 3 partial scan, 75 overlap) leaves the unit
+# "failed" so `systemctl --failed` / monitoring notices; status is in last_run.json.
+Nice=10
+IOSchedulingClass=idle
+ProtectSystem=strict
+ReadWritePaths=/srv/dicom-discovery
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true

@@ -46,6 +46,32 @@ The interactive Plotly report is a **core dependency**, so `dicom-discovery repo
 of the box — there is no separate visualisation step to install. For development, clone the
 repo and use an editable install with the test extras (`pip install -e ".[dev]"`).
 
+## Run it on a hospital NAS (unattended)
+
+`dicom-discovery job` is the scheduled, unattended run: it scans the share **read-only**,
+writes a timestamped run folder, keeps `latest/` pointing at the last usable report, records
+a PHI-free `last_run.json` for monitoring, refuses to overlap a running scan, prunes old runs
+and re-uses an index cache so nightly re-scans only read new files. NAS recycle bins,
+snapshots and thumbnail folders are skipped; directories it cannot list are reported
+(`PARTIAL`, exit code 3), never silently ignored.
+
+```bash
+dicom-discovery job --root /mnt/dicom --output-dir /srv/qc --dry-run   # preflight, writes nothing
+dicom-discovery job --root /mnt/dicom --output-dir /srv/qc             # exit 0/1/2/3/75
+```
+
+Two air-gapped deployment paths, both built and tested in CI (workflow **NAS bundle**) and
+downloadable as artifacts:
+
+- **Container on the NAS** (Synology Container Manager, QNAP, TrueNAS): a hardened image
+  (`amd64` + `arm64`) run via [`deploy/nas/docker-compose.yml`](deploy/nas/docker-compose.yml)
+  with no network, the DICOM share mounted read-only, a read-only root filesystem and a
+  non-root user.
+- **Linux server mounting the share**: an offline pip wheelhouse per Python version +
+  [`install-offline.sh`](deploy/nas/install-offline.sh) and systemd timer units.
+
+Step-by-step guide (French, for the hospital team): [`docs/NAS_DEPLOYMENT.md`](docs/NAS_DEPLOYMENT.md).
+
 ---
 
 ## Quickstart
@@ -206,11 +232,13 @@ not a clinical safety check.
 - The per-patient rollup reconciles the chain through *resolved* referenced UIDs but does
   not build a general connected-components graph; a deeply fragmented chain is flagged
   `FRAGMENTED` for manual review rather than fully reconstructed. (Deliberate scope choice.)
-- Scanning is header-only but reads every file once; on a ~1M-file tree over NFS this takes
-  a while (no persistent index cache yet — a natural next step).
+- Scanning is header-only but the first scan reads every file once; on a ~1M-file tree over
+  NFS this takes a while. Later runs re-use the index cache (`--cache`, on by default in
+  `job`) and only read new or changed files.
 - Validated on one centre's cohort and a synthetic set; other vendors' exports (private
   tags, transfer syntaxes) are not yet characterised.
-- ROI target detection is substring-based (`GTV`/`CTV`/`PTV`); no TG-263 nomenclature yet.
+- ROI target detection is substring-based (`GTV`/`CTV`/`PTV`); the TG-263 check is a light,
+  advisory nomenclature flag.
 
 ## Data & privacy
 
@@ -228,8 +256,13 @@ src/DICOM_discovery/
     completeness.py      # observed-vs-expected model (Protocol, timepoint from StudyDate)
     report_map.py        # self-contained completeness heatmap (Plotly embedded, no CDN)
     report_cohort.py     # unified RT-integrity + completeness cohort report (self-contained HTML)
-    cli.py / __main__.py # `dicom-discovery` commands: demo / index / rt-check / completeness / report
+    cli.py / __main__.py # `dicom-discovery` commands: demo / index / rt-check / completeness / report / job
+    job.py               # unattended scheduled run (run folders, latest/, status, lock, retention)
+    fsutil.py            # atomic writes (outputs and cache on network shares)
     synthetic.py         # synthetic DICOM-RT + longitudinal cohorts (+ ground truth)
 protocol.brain_rt_followup.yaml       # example expected-content protocol
-tests/                                # pytest suite (140 tests), driven by the synthetic cohorts
+Dockerfile                            # hardened NAS image (default command = `job`)
+deploy/nas/                           # docker-compose + .env, offline installer, systemd units
+docs/NAS_DEPLOYMENT.md                # NAS deployment guide (French)
+tests/                                # pytest suite (180 tests), synthetic + real public data
 ```

@@ -16,16 +16,12 @@ Dépôt regroupant les deux générations d'outils de découverte et de QC des f
 ## Structure du dépôt
 
 ```
-file_discovery_package/
-├── file_discovery/        # Version stable — utilisée en production
-├── DICOM_discovery/       # Version en développement — package Python structuré
-├── outputs/               # Sorties générées sur la cohorte réelle
-│   ├── run_epibrainrad/   # Run complet cohorte EpiBrainRad
-│   ├── run_all_patients/  # Run tous patients (RT integrity + rapports)
-│   └── run_test_3patients/# Run de validation sur 3 patients
-└── _archive/              # Code périmé conservé pour référence
-    ├── file_discovery_BACKUP_20260612/
-    └── file_discovery_package_audit/
+DICOM_discovery/                 # racine du dépôt
+├── file_discovery/              # Version historique — scanner utilisé en production
+├── DICOM_discovery/             # Package Python structuré (src/, tests/, Dockerfile, deploy/nas/, docs/)
+├── .github/workflows/           # CI (matrice 3.9→3.13, proof-of-work), bundle NAS, cohorte réelle TCIA
+├── outputs/                     # (local, non versionné) sorties sur la cohorte réelle
+└── _archive/                    # (local, non versionné) code périmé conservé pour référence
 ```
 
 ---
@@ -66,14 +62,17 @@ python file_discovery_runner.py \
 
 ## `DICOM_discovery/` — Version en développement
 
-Package Python structuré (`src/` layout), versionné, compatible **Python 3.9→3.13**, avec tests automatisés (140 tests, pytest) et CLI installable en **une commande**.
+Package Python structuré (`src/` layout), versionné, compatible **Python 3.9→3.13**, avec tests automatisés (180 tests, pytest) et CLI installable en **une commande**.
 
 **Fonctionnalités ajoutées par rapport à `file_discovery/` :**
 - Index DICOM par tags (PatientID, Modality, SeriesInstanceUID)
 - Verdicts par patient avec provenance horodatée (JSON + schema_version)
 - Vérification légère des ROI TG-263
 - Rapport de cohorte HTML interactif (timeline, KPI cliniques)
-- CLI `dicom-discovery` avec sous-commandes `index`, `rt-check`, `report`, `completeness`
+- CLI `dicom-discovery` avec sous-commandes `index`, `rt-check`, `report`, `completeness`, `job`
+- **Exécution planifiée sur NAS hospitalier** (`job`) : lecture seule, dossier par passage,
+  `latest/`, état `last_run.json`, verrou, rétention, cache d'index ; corbeilles/instantanés
+  NAS ignorés, dossiers illisibles signalés
 
 **Installation (une commande, directement depuis GitHub) :**
 
@@ -98,6 +97,18 @@ pytest
 ```
 
 Voir `DICOM_discovery/README.md` pour la documentation complète.
+
+### Déploiement sur un NAS hospitalier
+
+Deux voies, **sans accès Internet requis sur le NAS**, construites et testées en CI (workflow
+*NAS bundle*, artefacts téléchargeables) :
+
+- **Conteneur sur le NAS** (Synology Container Manager, QNAP, TrueNAS) — image durcie
+  `amd64`/`arm64` : sans réseau, partage DICOM en lecture seule, utilisateur non-root
+  (`DICOM_discovery/deploy/nas/docker-compose.yml`) ;
+- **Serveur Linux montant le partage** — *wheelhouse* pip hors-ligne + timer systemd.
+
+Guide pas à pas : [`DICOM_discovery/docs/NAS_DEPLOYMENT.md`](DICOM_discovery/docs/NAS_DEPLOYMENT.md).
 
 ---
 

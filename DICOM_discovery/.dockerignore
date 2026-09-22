@@ -1,0 +1,10 @@
+# Build context = this package directory. Only pyproject.toml, README.md, src/ and the
+# example protocol are needed; never send data, outputs or environments to the daemon.
+*
+!pyproject.toml
+!README.md
+!src/
+!protocol.brain_rt_followup.yaml
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info

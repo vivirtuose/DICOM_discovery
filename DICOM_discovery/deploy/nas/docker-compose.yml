@@ -1,0 +1,47 @@
+# DICOM_discovery on a hospital NAS — Synology Container Manager ("Project"), QNAP Container
+# Station, TrueNAS, or any host with Docker Compose v2. Research Use Only.
+#
+# 1. copy this file and .env.example (renamed .env) into e.g. /volume1/docker/dicom-discovery/
+# 2. edit .env (paths, PUID/PGID of the account that may read the DICOM share)
+# 3. one-off check (writes nothing):
+#      docker compose run --rm dicom-discovery job --root /data --output-dir /output --dry-run
+# 4. schedule (DSM Task Scheduler / cron, as root):
+#      docker compose -f /volume1/docker/dicom-discovery/docker-compose.yml run --rm dicom-discovery
+#    exit codes: 0 ok · 1 no DICOM · 2 error · 3 partial scan · 75 previous run still going
+#
+# Hardening: no network at all (patient data cannot leave the container), DICOM share
+# read-only, read-only root filesystem, no Linux capabilities, non-root user, bounded RAM/CPU.
+
+services:
+  dicom-discovery:
+    image: dicom-discovery:${DD_VERSION:-0.9.0}
+    user: "${PUID:-1026}:${PGID:-100}"
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # ~0.9 GB of RAM per million files scanned + report rendering; see docs/NAS_DEPLOYMENT.md.
+    mem_limit: ${MEM_LIMIT:-3g}
+    cpus: ${CPUS:-2}
+    environment:
+      TZ: ${TZ:-Europe/Paris}
+    volumes:
+      - ${DICOM_ROOT:?set DICOM_ROOT in .env}:/data:ro
+      - ${OUTPUT_DIR:?set OUTPUT_DIR in .env}:/output
+    command:
+      - job
+      - --root
+      - /data
+      - --output-dir
+      - /output
+      - --group-by
+      - ${GROUP_BY:-dicom}
+      - --workers
+      - ${WORKERS:-8}
+      - --keep
+      - ${KEEP_RUNS:-30}
+    restart: "no"
