@@ -1,14 +1,14 @@
 # DICOM Discovery — EpiBrainRad
 
 [![CI](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml/badge.svg)](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.9%E2%80%933.13-blue)
+![Python](https://img.shields.io/badge/python-3.9%E2%80%933.14-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Use: research-only](https://img.shields.io/badge/use-research--only-orange)
 
 Dépôt regroupant les deux générations d'outils de découverte et de QC des fichiers DICOM RT de la cohorte EpiBrainRad.
 
 > **Preuve de fonctionnement (proof-of-work).** La CI teste `DICOM_discovery` sur Python
-> 3.9→3.13, puis génère une **cohorte DICOM-RT synthétique** (aucune donnée patient) et exécute
+> 3.9→3.14, puis génère une **cohorte DICOM-RT synthétique** (aucune donnée patient) et exécute
 > le vrai pipeline `report --json` de bout en bout ; le rapport HTML autonome et le
 > `verdicts.json` produits sont téléversés comme **artefacts téléchargeables** de chaque run
 > CI. Voir l'onglet *Actions* → job *proof-of-work*.
@@ -19,7 +19,7 @@ Dépôt regroupant les deux générations d'outils de découverte et de QC des f
 DICOM_discovery/                 # racine du dépôt
 ├── file_discovery/              # Version historique — scanner utilisé en production
 ├── DICOM_discovery/             # Package Python structuré (src/, tests/, Dockerfile, deploy/nas/, docs/)
-├── .github/workflows/           # CI (matrice 3.9→3.13, proof-of-work), bundle NAS, cohorte réelle TCIA
+├── .github/workflows/           # CI (matrice 3.9→3.14 + Windows/macOS, proof-of-work), bundle NAS, cohorte réelle TCIA
 ├── outputs/                     # (local, non versionné) sorties sur la cohorte réelle
 └── _archive/                    # (local, non versionné) code périmé conservé pour référence
 ```
@@ -62,14 +62,14 @@ python file_discovery_runner.py \
 
 ## `DICOM_discovery/` — Version en développement
 
-Package Python structuré (`src/` layout), versionné, compatible **Python 3.9→3.13**, avec tests automatisés (183 tests, pytest) et CLI installable en **une commande**.
+Package Python structuré (`src/` layout), versionné, compatible **Python 3.9→3.14**, avec tests automatisés (191 tests, pytest) et CLI installable en **une commande**.
 
 **Fonctionnalités ajoutées par rapport à `file_discovery/` :**
 - Index DICOM par tags (PatientID, Modality, SeriesInstanceUID)
 - Verdicts par patient avec provenance horodatée (JSON + schema_version)
 - Vérification légère des ROI TG-263
 - Rapport de cohorte HTML interactif (timeline, KPI cliniques)
-- CLI `dicom-discovery` avec sous-commandes `index`, `rt-check`, `report`, `completeness`, `job`
+- CLI `dicom-discovery` avec sous-commandes `index`, `rt-check`, `report`, `completeness`, `job`, `doctor`
 - **Exécution planifiée sur NAS hospitalier** (`job`) : lecture seule, dossier par passage,
   `latest/`, état `last_run.json`, verrou, rétention, cache d'index ; corbeilles/instantanés
   NAS ignorés, dossiers illisibles signalés
@@ -137,7 +137,7 @@ Ces dossiers sont conservés pour référence historique. Ne pas réutiliser.
 
 ## Environnement
 
-- `DICOM_discovery/` : **Python 3.9→3.13**, testé en CI sur toute la matrice. Installation via
+- `DICOM_discovery/` : **Python 3.9→3.14**, testé en CI sur Linux, macOS et Windows. Installation via
   un simple `venv` + `pip` (aucun environnement Conda requis).
 - `file_discovery/` : version historique, Python 3.8 (production NAS).
 - Accès NAS requis uniquement pour les runs sur données réelles : `/mnt/NAS2418_RADT/`. Les

@@ -1,7 +1,7 @@
 # DICOM_discovery
 
 [![CI](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml/badge.svg)](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.9%E2%80%933.13-blue)
+![Python](https://img.shields.io/badge/python-3.9%E2%80%933.14-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Use: research-only](https://img.shields.io/badge/use-research--only-orange)
 
@@ -33,7 +33,7 @@ are detected by **content** (the `DICM` preamble / a parseable SOPClassUID), not
 
 ## Install
 
-Runs on **Python 3.9–3.13** (Linux / macOS / Windows). One command, straight from GitHub —
+Runs on **Python 3.9–3.14**, tested in CI on Linux, macOS and Windows. One command, straight from GitHub —
 no clone needed (the package lives in the `DICOM_discovery/` subdirectory of the repo):
 
 ```bash
@@ -71,6 +71,20 @@ downloadable as artifacts:
   [`install-offline.sh`](deploy/nas/install-offline.sh) and systemd timer units.
 
 Step-by-step guide (French, for the hospital team): [`docs/NAS_DEPLOYMENT.md`](docs/NAS_DEPLOYMENT.md).
+
+## On an unfamiliar machine
+
+```bash
+dicom-discovery --version
+dicom-discovery doctor --root /mnt/dicom --output-dir /srv/qc
+```
+
+`doctor` prints the tool, Python, platform and dependency versions, the stdout / filesystem /
+locale encodings and — on Windows — whether long paths (>260 characters) are enabled, then
+probes the share for readability and the output folder for writability. It exits 1 when a
+check fails, so a scheduler can run it as a gate before a 40-minute scan that would write
+nothing. CSV exports carry a UTF-8 BOM so accented verdict actions open correctly in Excel;
+`verdicts.json` stays BOM-free for strict parsers.
 
 ---
 
@@ -258,13 +272,14 @@ src/DICOM_discovery/
     completeness.py      # observed-vs-expected model (Protocol, timepoint from StudyDate)
     report_map.py        # self-contained completeness heatmap (Plotly embedded, no CDN)
     report_cohort.py     # unified RT-integrity + completeness cohort report (self-contained HTML)
-    cli.py / __main__.py # `dicom-discovery` commands: demo / index / rt-check / completeness / report / job
+    cli.py / __main__.py # `dicom-discovery` commands: demo / index / rt-check / completeness / report / job / doctor
     job.py               # unattended scheduled run (run folders, latest/, status, lock, retention)
+    doctor.py            # environment report + share/output probes (`doctor`)
     fsutil.py            # atomic writes (outputs and cache on network shares)
     synthetic.py         # synthetic DICOM-RT + longitudinal cohorts (+ ground truth)
 protocol.brain_rt_followup.yaml       # example expected-content protocol
 Dockerfile                            # hardened NAS image (default command = `job`)
 deploy/nas/                           # docker-compose + .env, offline installer, systemd units
 docs/NAS_DEPLOYMENT.md                # NAS deployment guide (French)
-tests/                                # pytest suite (183 tests), synthetic + real public data
+tests/                                # pytest suite (191 tests), synthetic + real public data
 ```

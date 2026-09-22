@@ -39,7 +39,7 @@ from typing import Optional
 from . import __version__
 from .completeness import DEFAULT_PROTOCOL, build_completeness, load_protocol
 from .contract import build_verdict_payload, validate_payload
-from .fsutil import atomic_write_bytes, atomic_write_text
+from .fsutil import atomic_write_bytes, atomic_write_csv, atomic_write_text
 from .indexer import build_index
 from .report_cohort import render_cohort_report, verdict_counts
 from .rt_integrity import build_rt_integrity, build_rt_rollup
@@ -265,8 +265,8 @@ def _run(args, out: Path, run_dir: Path, status: dict, preflight) -> int:
     comp_state, comp_hover, comp_long = build_completeness(idx.table, protocol)
 
     atomic_write_text(run_dir / "index_manifest.json", json.dumps(idx.manifest, indent=2))
-    atomic_write_text(run_dir / "rt_integrity.csv", rt_study_df.to_csv(index=False))
-    atomic_write_text(run_dir / "rt_integrity_by_patient.csv", rollup_df.to_csv(index=False))
+    atomic_write_csv(run_dir / "rt_integrity.csv", rt_study_df)
+    atomic_write_csv(run_dir / "rt_integrity_by_patient.csv", rollup_df)
     payload = build_verdict_payload(rollup_df, manifest=idx.manifest, protocol_name=protocol.name)
     validate_payload(payload)
     atomic_write_text(run_dir / "verdicts.json", json.dumps(payload, indent=2, ensure_ascii=False))

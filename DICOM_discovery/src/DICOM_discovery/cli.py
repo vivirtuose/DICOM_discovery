@@ -9,6 +9,8 @@ completeness   observed-vs-expected completeness map for a longitudinal cohort.
 report         unified RT-integrity + completeness cohort report (self-contained HTML).
 job            unattended scheduled run for a NAS / server: timestamped run folder, latest/
                mirror, last_run.json status, lock, retention, index cache (see job.py).
+doctor         report the environment (Python, platform, dependency versions) and probe a
+               share / output folder — the first thing to run on an unfamiliar machine.
 
 ``--dry-run`` (on index/rt-check/completeness/report/job) runs the preflight only: it reports what
 the indexer actually sees and writes nothing. Even without it, a report is refused when
@@ -23,6 +25,7 @@ import logging
 import sys
 from pathlib import Path
 
+from . import __version__
 from .completeness import (
     DEFAULT_PROTOCOL,
     assign_timepoints,
@@ -31,7 +34,7 @@ from .completeness import (
     patient_completeness,
 )
 from .contract import build_verdict_payload, validate_payload
-from .fsutil import atomic_write_text
+from .fsutil import atomic_write_csv, atomic_write_text
 from .indexer import IndexResult, build_index
 from .report_cohort import render_cohort_report
 from .report_map import render_completeness_map
@@ -91,7 +94,7 @@ def _cmd_index(args) -> int:
     if args.dry_run:
         return 0
     if args.out_csv:
-        atomic_write_text(args.out_csv, idx.table.to_csv(index=False))
+        atomic_write_csv(args.out_csv, idx.table)
         print("Index table ->", args.out_csv)
     manifest_path = args.out_manifest or "index_manifest.json"
     atomic_write_text(manifest_path, json.dumps(idx.manifest, indent=2))
@@ -134,8 +137,8 @@ def _cmd_rt_check(args) -> int:
         print("\n=== Per-study detail (RT studies) ===")
         print(rt[cols].to_string(index=False))
     if args.out_csv:
-        atomic_write_text(args.out_csv, df.to_csv(index=False))
-        atomic_write_text(args.out_csv.replace(".csv", "_by_patient.csv"), rollup.to_csv(index=False))
+        atomic_write_csv(args.out_csv, df)
+        atomic_write_csv(args.out_csv.replace(".csv", "_by_patient.csv"), rollup)
         print(f"\nCSV (per study) -> {args.out_csv}")
         print(f"CSV (per patient) -> {args.out_csv.replace('.csv', '_by_patient.csv')}")
     if args.json_out:
@@ -174,6 +177,12 @@ def _cmd_report(args) -> int:
     if args.json_out:
         _write_verdicts_json(rollup_df, idx.manifest, protocol, args.json_out)
     return 0
+
+
+def _cmd_doctor(args) -> int:
+    from .doctor import run_doctor
+
+    return run_doctor(args.root, args.output_dir)
 
 
 def _cmd_job(args) -> int:
@@ -215,6 +224,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="dicom-discovery", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+    p.add_argument("-V", "--version", action="version", version=f"dicom-discovery {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
     def _common(sp):
@@ -281,6 +291,11 @@ def build_parser() -> argparse.ArgumentParser:
     j.add_argument("--stale-lock-hours", type=float, default=24.0,
                    help="take over a lock older than this, left by a crashed run (default 24)")
     j.set_defaults(func=_cmd_job)
+
+    doc = sub.add_parser("doctor", help="report the environment and probe a share / output folder")
+    doc.add_argument("--root", default=None, help="DICOM tree to probe for readability")
+    doc.add_argument("--output-dir", default=None, help="output folder to probe for writability")
+    doc.set_defaults(func=_cmd_doctor)
     return p
 
 

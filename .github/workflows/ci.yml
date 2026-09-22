@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
 
@@ -44,6 +44,37 @@ jobs:
           path: DICOM_discovery/tests/.cache
           key: vs-seg-001-rtchain-v1
 
+      - name: Test (pytest)
+        run: pytest
+
+  test-os:
+    # The README promises Linux / macOS / Windows. Ubuntu alone cannot back that claim: the
+    # bugs this leg catches are path-, case- and encoding-shaped (the cp1252 console crash
+    # fixed in 0.8 was exactly that family). Two Python versions per OS — the oldest and the
+    # newest supported — keep the signal without a full second matrix.
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, python-version: "3.9" }
+          - { os: windows-latest, python-version: "3.14" }
+          - { os: macos-latest, python-version: "3.11" }
+          - { os: macos-latest, python-version: "3.14" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package (with dev extras)
+        run: pip install -e ".[dev]"
+
+      # No TCIA cache here: the tier skips when the chain is absent, and these legs exist to
+      # exercise the local filesystem, not the network.
       - name: Test (pytest)
         run: pytest
 

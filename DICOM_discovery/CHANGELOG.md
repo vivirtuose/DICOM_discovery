@@ -4,6 +4,23 @@ All notable changes to **DICOM_discovery**. The package began as a single-instit
 data-curation script and was rebuilt, in council-reviewed increments, into an adaptive
 cohort-QC tool.
 
+## 0.9.1 — portability: proven on Windows/macOS, environment doctor, Excel-safe CSVs (2026-09-22)
+- **CI now proves the claim.** The matrix adds **Python 3.14** and two extra legs per OS on
+  **Windows** and **macOS** (oldest + newest supported Python). Until now the README promised
+  Linux/macOS/Windows while only Ubuntu was tested — the cp1252 console crash fixed in 0.8 was
+  exactly that family of bug.
+- **`dicom-discovery doctor`** — prints tool/Python/platform/dependency versions, stdout,
+  filesystem and locale encodings, and (on Windows) whether long paths >260 chars are enabled;
+  with `--root` / `--output-dir` it probes the share for readability and the output folder for
+  writability. Exit 1 when a check fails, so it can gate a scheduled run.
+- **`--version` / `-V`** on the CLI (it had none — awkward in a bug report).
+- **CSVs are written with a UTF-8 BOM** so the French verdict actions ("récupérer l'image de
+  planification") open correctly in Excel instead of as mojibake; `verdicts.json` stays
+  BOM-free for strict JSON parsers.
+- **`requirements.txt` removed.** It pinned a Python-3.8-era set (pandas 2.0.3, pydicom 2.4.4)
+  that contradicted `pyproject.toml` and cannot span 3.9–3.14; `pyproject.toml` is the single
+  source of truth, and the per-Python offline wheelhouses are the reproducible artifact.
+
 ## 0.9.0 — runs unattended on a hospital NAS (2026-09-22)
 Makes the tool deployable on an air-gapped hospital NAS (or a server mounting one) and safe to
 schedule. RUO throughout.
