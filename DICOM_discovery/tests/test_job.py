@@ -178,6 +178,49 @@ def test_partial_scan_publishes_but_exits_3(synthetic_rt_root, tmp_path, monkeyp
     assert not (tmp_path / ".cache").exists()
 
 
+def test_unwritable_output_is_a_clear_error_not_a_traceback(tmp_path, capsys):
+    blocker = tmp_path / "qc"
+    blocker.write_text("a file where the output folder should be", encoding="utf-8")
+
+    rc = main(["job", "--root", str(tmp_path), "--output-dir", str(blocker)])
+
+    assert rc == 2
+    assert "cannot use output folder" in capsys.readouterr().err
+
+
+def test_lock_heartbeat_keeps_a_long_scan_from_looking_stale(tmp_path):
+    """A first scan of a huge share can outlast --stale-lock-hours; the running job must keep
+    its lock fresh so the next scheduled run does not take it over and run concurrently."""
+    from DICOM_discovery.job import _LockHeartbeat
+
+    lock = tmp_path / LOCK
+    lock.write_text("{}", encoding="utf-8")
+    old = time.time() - 3 * 24 * 3600
+    os.utime(lock, (old, old))
+
+    with _LockHeartbeat(lock, interval_s=0.02):
+        time.sleep(0.3)
+
+    assert time.time() - lock.stat().st_mtime < 60
+
+
+def test_pruning_never_deletes_the_current_run(tmp_path):
+    """If the NAS clock went backwards, the current run sorts as the *oldest*; it must still
+    survive retention."""
+    from DICOM_discovery.job import _prune_runs
+
+    runs = tmp_path / "runs"
+    for name in ("20300101T000000Z", "20300102T000000Z"):
+        (runs / name).mkdir(parents=True)
+    current = runs / "20200101T000000Z"
+    current.mkdir()
+
+    _prune_runs(runs, keep=1, current=current)
+
+    assert current.is_dir()
+    assert sorted(p.name for p in runs.iterdir()) == ["20200101T000000Z"]
+
+
 @pytest.fixture()
 def synthetic_rt_root(tmp_path_factory):
     from DICOM_discovery import generate_synthetic_cohort

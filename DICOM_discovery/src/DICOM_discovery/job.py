@@ -30,6 +30,7 @@ import re
 import shutil
 import socket
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -49,6 +50,7 @@ EXIT_OK, EXIT_NO_DICOM, EXIT_ERROR, EXIT_PARTIAL, EXIT_LOCKED = 0, 1, 2, 3, 75
 LOCK_NAME = ".dicom-discovery.lock"
 STATUS_NAME = "last_run.json"
 RUN_STAMP_RE = re.compile(r"^\d{8}T\d{6}Z(-\d+)?$")
+LOCK_HEARTBEAT_S = 600.0  # a running job refreshes its lock's mtime this often
 
 
 def _utc_now() -> datetime.datetime:
@@ -85,6 +87,30 @@ def _acquire_lock(lock: Path, stale_hours: float) -> bool:
     return False
 
 
+class _LockHeartbeat:
+    """Keep the lock's mtime fresh while the job runs, so "stale" means "crashed", not "slow":
+    a first scan of a huge share may outlast ``--stale-lock-hours`` and must not have its lock
+    taken over by the next scheduled run."""
+
+    def __init__(self, lock: Path, interval_s: float = LOCK_HEARTBEAT_S):
+        self._lock, self._interval = lock, interval_s
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._beat, name="dicom-discovery-lock", daemon=True)
+
+    def _beat(self) -> None:
+        while not self._stop.wait(self._interval):
+            with contextlib.suppress(OSError):
+                os.utime(self._lock)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._thread.join()
+
+
 # --------------------------------------------------------------------------- #
 # Run folder, latest mirror, retention
 # --------------------------------------------------------------------------- #
@@ -108,12 +134,16 @@ def _publish_latest(run_dir: Path, latest: Path) -> None:
             atomic_write_bytes(latest / f.name, f.read_bytes())
 
 
-def _prune_runs(runs: Path, keep: int) -> None:
-    """Delete all but the newest ``keep`` run folders; only folders named like a run stamp."""
+def _prune_runs(runs: Path, keep: int, current: Optional[Path] = None) -> None:
+    """Delete all but the newest ``keep`` run folders; only folders named like a run stamp.
+
+    ``current`` (this run) always survives, even if a clock set back makes it sort oldest."""
     if keep <= 0:
         return
-    stamped = sorted(p for p in runs.iterdir() if p.is_dir() and RUN_STAMP_RE.match(p.name))
-    for old in stamped[:-keep]:
+    stamped = sorted(p for p in runs.iterdir()
+                     if p.is_dir() and RUN_STAMP_RE.match(p.name) and p != current)
+    n_others = keep - 1 if current is not None else keep
+    for old in stamped[:max(0, len(stamped) - n_others)]:
         shutil.rmtree(old, ignore_errors=True)
         LOG.info("pruned old run %s", old.name)
 
@@ -133,6 +163,9 @@ class _Tee:
     def flush(self):
         for s in self._streams:
             s.flush()
+
+    def __getattr__(self, name):  # encoding, isatty, ... behave like the real stdout
+        return getattr(self._streams[0], name)
 
 
 @contextlib.contextmanager
@@ -171,9 +204,14 @@ def _counts(manifest: dict) -> dict:
 def run_job(args, preflight) -> int:
     """Run one scheduled cohort pass. ``preflight`` is the CLI's preflight printer."""
     out = Path(args.output_dir)
-    out.mkdir(parents=True, exist_ok=True)
     lock = out / LOCK_NAME
-    if not _acquire_lock(lock, args.stale_lock_hours):
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+        acquired = _acquire_lock(lock, args.stale_lock_hours)
+    except OSError as exc:  # read-only share, wrong PUID/PGID, a file in the way...
+        print(f"cannot use output folder {out}: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if not acquired:
         print(f"another dicom-discovery job holds {lock} — exiting (code {EXIT_LOCKED}).",
               file=sys.stderr)
         return EXIT_LOCKED
@@ -185,11 +223,11 @@ def run_job(args, preflight) -> int:
     try:
         run_dir = _new_run_dir(out / "runs", started)
         status["run_dir"] = run_dir.relative_to(out).as_posix()
-        with _run_log(run_dir / "run.log"):
+        with _LockHeartbeat(lock), _run_log(run_dir / "run.log"):
             code = _run(args, out, run_dir, status, preflight)
         if code in (EXIT_OK, EXIT_PARTIAL):  # after run.log is closed, so it is mirrored whole
             _publish_latest(run_dir, out / "latest")
-            _prune_runs(out / "runs", args.keep)
+            _prune_runs(out / "runs", args.keep, current=run_dir)
     except Exception as exc:  # noqa: BLE001 — a scheduler needs a status, not a stack dump
         status.update(status="error", error=f"{type(exc).__name__}: {exc}")
         if run_dir is not None:

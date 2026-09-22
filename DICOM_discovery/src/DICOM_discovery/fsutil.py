@@ -16,6 +16,11 @@ from typing import Union
 
 PathLike = Union[str, "os.PathLike[str]"]
 
+# Read once at import (single-threaded): os.umask can only be read by setting it, which is
+# not thread-safe while worker threads may be creating files.
+_UMASK = os.umask(0)
+os.umask(_UMASK)
+
 
 def _default_mode(target: Path) -> int:
     """Permission bits the file would get from a plain ``open()`` (keeps an existing file's).
@@ -26,9 +31,7 @@ def _default_mode(target: Path) -> int:
     try:
         return target.stat().st_mode & 0o777
     except OSError:
-        umask = os.umask(0)
-        os.umask(umask)
-        return 0o666 & ~umask
+        return 0o666 & ~_UMASK
 
 
 def atomic_write_bytes(path: PathLike, data: bytes) -> None:
