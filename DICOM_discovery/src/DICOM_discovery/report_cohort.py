@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 from .completeness import Protocol, patient_completeness
+from .fsutil import atomic_write_text
 from .rt_integrity import order_for_review
 
 try:
@@ -309,6 +310,9 @@ def _topbar_html(manifest: dict) -> str:
         ("studies", manifest.get("n_studies", 0)),
         ("generated", manifest.get("generated_utc", "")),
     ]
+    if manifest.get("n_dirs_unreadable"):
+        # A partial scan (permissions / unmounted share) must be visible in the report itself.
+        items.insert(1, ("⚠ unreadable dirs — PARTIAL scan", manifest["n_dirs_unreadable"]))
     chips = "".join(
         f"<span class='manifest-item'><span class='mk'>{_esc(k)}</span>"
         f"<span class='mv'>{_esc(v)}</span></span>"
@@ -1011,7 +1015,7 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
 <script>{_script()}</script>
 </body></html>"""
 
-    out.write_text(page, encoding="utf-8")
+    atomic_write_text(out, page)
     LOG.info("Cohort report -> %s (%d patients)", out, kpis["n_patients"])
     return str(out)
 

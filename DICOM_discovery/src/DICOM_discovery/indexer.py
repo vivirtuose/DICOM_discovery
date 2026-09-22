@@ -15,17 +15,21 @@ Design decisions (from the generalization council):
 """
 from __future__ import annotations
 
+import collections
 import datetime
+import fnmatch
 import logging
 import os
 import pickle
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Pattern, Tuple
+from typing import Callable, Dict, Iterable, Iterator, List, Optional, Pattern, Sequence, Tuple, TypeVar
 
 import pandas as pd
+
+from .fsutil import atomic_write_bytes
 
 try:
     from pydicom import dcmread
@@ -78,8 +82,29 @@ SPECIFIC_TAGS = [
     "DoseUnits", "DoseSummationType", "ReferencedRTPlanSequence",
 ]
 
-# Files larger than this checkpoint count trigger an intermediate cache flush.
+# First intermediate cache flush after this many files read; the interval then doubles, so a
+# ~1M-file scan flushes ~8 times (linear total I/O) instead of rewriting the cache every 5000.
 DEFAULT_CHECKPOINT_EVERY = 5000
+
+# Directories that NAS appliances, snapshots and SMB/AFP clients create inside shares. They
+# hold deleted data (recycle bins), full duplicate copies (snapshots) or thumbnails — never
+# live cohort data — so they are pruned from the walk (matched case-insensitively by name).
+NAS_SYSTEM_DIRS = frozenset(d.casefold() for d in (
+    "@eaDir", "#recycle", "#snapshot", "@sharebin", "@tmp",                     # Synology
+    "@Recycle", "@Recently-Snapshot", ".@__thumb", "@__thumb", ".@__qini",     # QNAP
+    ".snapshot", ".snapshots", "~snapshot", ".zfs",                             # NetApp / NFS / ZFS
+    "$RECYCLE.BIN", "System Volume Information",                                # Windows clients
+    ".AppleDouble", ".AppleDB", ".AppleDesktop", ".TemporaryItems", ".Trashes",
+    ".Spotlight-V100", ".fseventsd",                                            # macOS clients
+    "lost+found",
+))
+NAS_SYSTEM_DIR_PREFIXES = (".trash-",)  # freedesktop per-user trash (.Trash-1000)
+# Client litter files: never DICOM, and a ``._x.dcm`` AppleDouble must not count as unreadable.
+LITTER_FILES = frozenset(f.casefold() for f in (".DS_Store", "Thumbs.db", "desktop.ini", "ehthumbs.db"))
+# Unreadable directory paths kept verbatim in the manifest (the count is always exact).
+MAX_LISTED_UNREADABLE_DIRS = 50
+# Header reads in flight at once, per worker thread (bounded streaming — see _bounded_map).
+READS_IN_FLIGHT_PER_WORKER = 32
 
 TABLE_COLUMNS = [
     "path", "source_root", "patient_id", "patient_id_source",
@@ -259,19 +284,73 @@ def _index_one(fp: str) -> Tuple[Optional[dict], bool]:
     return None, looked
 
 
-def _iter_files(root_path: Path):
+def _is_excluded_dir(name: str, extra_patterns: Sequence[str]) -> bool:
+    folded = name.casefold()
+    if folded in NAS_SYSTEM_DIRS or folded.startswith(NAS_SYSTEM_DIR_PREFIXES):
+        return True
+    return any(fnmatch.fnmatch(folded, p.casefold()) for p in extra_patterns)
+
+
+def _is_litter_file(name: str) -> bool:
+    return name.startswith("._") or name.casefold() in LITTER_FILES
+
+
+@dataclass
+class _WalkStats:
+    n_dirs_excluded: int = 0
+    unreadable_dirs: List[str] = field(default_factory=list)
+
+
+def _iter_files(root_path: Path, stats: Optional[_WalkStats] = None,
+                exclude_dirs: Sequence[str] = ()) -> Iterator[str]:
     """Stream candidate file paths from the tree (os.walk over os.scandir) without
-    materializing the full ~1M-path list first — reads can begin immediately."""
-    for dp, _d, fns in os.walk(root_path):
+    materializing the full ~1M-path list first — reads can begin immediately.
+
+    NAS system / recycle / snapshot folders (and ``exclude_dirs`` name patterns) are pruned,
+    client litter files skipped, and every directory that cannot be listed (permissions,
+    unmounted share) is recorded in ``stats`` — never silently dropped, as ``os.walk`` does
+    by default."""
+    stats = stats if stats is not None else _WalkStats()
+
+    def _onerror(err: OSError) -> None:
+        stats.unreadable_dirs.append(str(err.filename) if err.filename else str(root_path))
+        LOG.warning("cannot list directory %s: %s", err.filename, err.strerror or err)
+
+    for dp, dirnames, fns in os.walk(root_path, onerror=_onerror):
+        kept = [d for d in dirnames if not _is_excluded_dir(d, exclude_dirs)]
+        stats.n_dirs_excluded += len(dirnames) - len(kept)
+        dirnames[:] = kept  # prune in place: os.walk will not descend into excluded dirs
         for fn in fns:
-            yield os.path.join(dp, fn)
+            if not _is_litter_file(fn):
+                yield os.path.join(dp, fn)
+
+
+_T = TypeVar("_T")
+_R = TypeVar("_R")
+
+
+def _bounded_map(ex: Executor, fn: Callable[[_T], _R], items: Iterable[_T], window: int) -> Iterator[_R]:
+    """Ordered parallel map that keeps at most ``window`` calls in flight.
+
+    ``Executor.map`` submits the *whole* iterable before yielding the first result — on a
+    ~1M-file share that is ~2 GB of pending futures (measured), enough to exhaust a NAS.
+    Pulling paths only as results are consumed keeps memory flat whatever the tree size.
+    """
+    pending: collections.deque = collections.deque()
+    for item in items:
+        pending.append(ex.submit(fn, item))
+        if len(pending) >= window:
+            yield pending.popleft().result()
+    while pending:
+        yield pending.popleft().result()
 
 
 def build_index(root: str, patient_regexes: Optional[List[str]] = None,
                 group_by: str = "dicom", progress: bool = False,
                 workers: int = 8, cache: Optional[str] = None,
                 assume_immutable: bool = False,
-                checkpoint_every: int = DEFAULT_CHECKPOINT_EVERY) -> IndexResult:
+                checkpoint_every: int = DEFAULT_CHECKPOINT_EVERY,
+                exclude_dirs: Optional[Sequence[str]] = None) -> IndexResult:
     """Walk ``root`` and build the canonical instance table.
 
     ``group_by='dicom'`` keys patients by the ``PatientID`` tag (with traced fallback);
@@ -282,8 +361,15 @@ def build_index(root: str, patient_regexes: Optional[List[str]] = None,
     ``cache`` (opt-in): a path where raw header records are persisted keyed by
     (path, mtime, size). Unchanged files are reused on the next run instead of re-read —
     turning a multi-hour re-scan into seconds. Patient keying is always re-applied, so
-    changing ``--group-by`` between runs stays correct. The cache is flushed to disk every
-    ``checkpoint_every`` files read (and once at the end), so a long/crashed scan resumes.
+    changing ``--group-by`` between runs stays correct. The cache is flushed to disk (atomically)
+    after ``checkpoint_every`` files read, then at doubling intervals, and once at the end — so
+    a long/crashed scan resumes, while total cache I/O stays linear in the tree size.
+
+    NAS system folders (recycle bins, snapshots, thumbnail stores — see ``NAS_SYSTEM_DIRS``)
+    and any ``exclude_dirs`` name patterns (fnmatch, case-insensitive) are not walked; their
+    count is recorded as ``n_dirs_excluded``. Directories that cannot be listed are recorded
+    as ``n_dirs_unreadable`` / ``unreadable_dirs`` so a partial scan is never mistaken for a
+    complete one.
 
     ``assume_immutable`` (opt-in, **for immutable / append-only archives only**): when set
     together with an existing ``cache``, the per-file ``os.stat`` is skipped and the cache is
@@ -318,7 +404,7 @@ def build_index(root: str, patient_regexes: Optional[List[str]] = None,
         if not cache:
             return
         try:
-            Path(cache).write_bytes(pickle.dumps({"records": raw_by_path, "meta": file_meta}))
+            atomic_write_bytes(cache, pickle.dumps({"records": raw_by_path, "meta": file_meta}))
         except Exception as exc:  # noqa: BLE001
             LOG.warning("could not write cache %s: %s", cache, exc)
 
@@ -357,11 +443,14 @@ def build_index(root: str, patient_regexes: Optional[List[str]] = None,
     # Stream paths into the executor: ``_plan`` records every path (output order) and the
     # cache reuse as it goes, yielding only the paths that still need a header read. The
     # worker returns ``(path, result)`` so the path survives the parallel map.
-    to_read = (fp for fp in _iter_files(root_path) if _plan(fp))
+    walk = _WalkStats()
+    to_read = (fp for fp in _iter_files(root_path, walk, exclude_dirs or ()) if _plan(fp))
 
     n_read = 0
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-        results = ex.map(_read_pair, to_read)
+    next_checkpoint = max(1, checkpoint_every) if checkpoint_every else 0
+    n_workers = max(1, workers)
+    with ThreadPoolExecutor(max_workers=n_workers) as ex:
+        results = _bounded_map(ex, _read_pair, to_read, window=n_workers * READS_IN_FLIGHT_PER_WORKER)
         if progress and _HAS_TQDM:
             results = tqdm(results, unit="file", desc="indexing")
         for fp, (rec, looked) in results:
@@ -370,35 +459,40 @@ def build_index(root: str, patient_regexes: Optional[List[str]] = None,
             if rec is not None:
                 raw_by_path[fp] = rec
             n_read += 1
-            if cache and checkpoint_every and n_read % checkpoint_every == 0:
+            if cache and next_checkpoint and n_read >= next_checkpoint:
                 _checkpoint()
+                next_checkpoint = n_read * 2  # geometric: O(log n) flushes, linear total I/O
 
     n_files = len(all_paths)
     LOG.info("walked %s: %d files seen, %d read (%d threads)", root_path, n_files, n_read, workers)
     if cache:
         _checkpoint()
 
-    records: List[dict] = []
+    # Resolve the patient key, then collapse image series to one row (CT/MR slices) while
+    # keeping every RT object. Deduplicating *before* copying records keeps peak memory at
+    # the size of the collapsed table, not of the ~1M per-slice records.
+    no_series: List[dict] = []
+    by_series: List[dict] = []
+    seen_series = set()
     for fp in all_paths:
-        rec = raw_by_path.get(fp)
-        if rec is None:
+        raw = raw_by_path.get(fp)
+        if raw is None:
             continue
-        rec = dict(rec)
-        rec["source_root"] = str(root_path)
         if group_by == "folder":
-            rec["patient_id"], rec["patient_id_source"] = _folder_key(fp, root_path, patterns), "folder"
+            pid, pid_source = _folder_key(fp, root_path, patterns), "folder"
         else:
-            rec["patient_id"], rec["patient_id_source"] = _resolve_patient(rec, root_path, patterns)
-        records.append(rec)
+            pid, pid_source = _resolve_patient(raw, root_path, patterns)
+        series_uid = str(raw["series_uid"])
+        if series_uid:
+            if (pid, series_uid) in seen_series:
+                continue
+            seen_series.add((pid, series_uid))
+        rec = dict(raw)
+        rec["source_root"] = str(root_path)
+        rec["patient_id"], rec["patient_id_source"] = pid, pid_source
+        (by_series if series_uid else no_series).append(rec)
 
-    df = pd.DataFrame(records, columns=TABLE_COLUMNS)
-    # Collapse image series to a single row (CT slices), keep every RT object.
-    if not df.empty:
-        has_series = df["series_uid"].astype(str) != ""
-        df = pd.concat([
-            df[~has_series],
-            df[has_series].drop_duplicates(subset=["patient_id", "series_uid"], keep="first"),
-        ], ignore_index=True)
+    df = pd.DataFrame(no_series + by_series, columns=TABLE_COLUMNS)
 
     manifest = {
         "tool": "DICOM_discovery",
@@ -409,6 +503,10 @@ def build_index(root: str, patient_regexes: Optional[List[str]] = None,
         "n_files_seen": n_files,
         "n_dicom_indexed": int(len(df)),
         "n_unreadable": len(unreadable),
+        "n_dirs_excluded": walk.n_dirs_excluded,
+        "exclude_dirs": list(exclude_dirs or []),
+        "n_dirs_unreadable": len(walk.unreadable_dirs),
+        "unreadable_dirs": walk.unreadable_dirs[:MAX_LISTED_UNREADABLE_DIRS],
         "n_patients": int(df["patient_id"].nunique()) if not df.empty else 0,
         "n_studies": int(df["study_uid"].nunique()) if not df.empty else 0,
         "patient_id_source_counts": (df["patient_id_source"].value_counts().to_dict() if not df.empty else {}),

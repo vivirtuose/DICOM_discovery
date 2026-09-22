@@ -16,6 +16,7 @@ from typing import Optional
 import pandas as pd
 
 from .completeness import CellState, Protocol, patient_completeness
+from .fsutil import atomic_write_text
 
 try:
     import plotly.graph_objects as go
@@ -136,6 +137,6 @@ def render_completeness_map(state_df: pd.DataFrame, hover_df: pd.DataFrame,
 <table><tr><th>patient</th><th>expected</th><th>present</th><th>missing</th><th>%</th></tr>{rows}</table>
 <p style="color:#777;font-size:12px;margin-top:18px">Research Use Only — synthetic data; not a clinical safety check.</p>
 </body></html>"""
-    out.write_text(page, encoding="utf-8")
+    atomic_write_text(out, page)
     LOG.info("Completeness map -> %s", out)
     return out

@@ -7,8 +7,10 @@ index          build the canonical DICOM index of a tree (table CSV + manifest J
 rt-check       RT chain integrity QC on a directory (per patient/study).
 completeness   observed-vs-expected completeness map for a longitudinal cohort.
 report         unified RT-integrity + completeness cohort report (self-contained HTML).
+job            unattended scheduled run for a NAS / server: timestamped run folder, latest/
+               mirror, last_run.json status, lock, retention, index cache (see job.py).
 
-``--dry-run`` (on index/rt-check/completeness/report) runs the preflight only: it reports what
+``--dry-run`` (on index/rt-check/completeness/report/job) runs the preflight only: it reports what
 the indexer actually sees and writes nothing. Even without it, a report is refused when
 no DICOM is found, so the tool never emits a falsely-confident result on a tree it did
 not understand.
@@ -29,6 +31,7 @@ from .completeness import (
     patient_completeness,
 )
 from .contract import build_verdict_payload, validate_payload
+from .fsutil import atomic_write_text
 from .indexer import IndexResult, build_index
 from .report_cohort import render_cohort_report
 from .report_map import render_completeness_map
@@ -45,6 +48,14 @@ def _preflight(idx: IndexResult, protocol=None) -> bool:
     print(f"  files seen        : {m['n_files_seen']}")
     print(f"  DICOM indexed     : {m['n_dicom_indexed']}")
     print(f"  unreadable        : {m['n_unreadable']}")
+    print(f"  excluded dirs     : {m.get('n_dirs_excluded', 0)}  (NAS recycle/snapshot/thumbnail folders)")
+    n_bad_dirs = m.get("n_dirs_unreadable", 0)
+    print(f"  unreadable dirs   : {n_bad_dirs}")
+    for d in m.get("unreadable_dirs", [])[:5]:
+        print(f"      {d}")
+    if n_bad_dirs:
+        print(f"  ⚠ PARTIAL scan: {n_bad_dirs} director(y/ies) could not be listed (permissions or "
+              "unmounted share) — verdicts cover only what was visible.")
     print(f"  patients          : {m['n_patients']}  (key source: {m['patient_id_source_counts']})")
     print(f"  studies           : {m['n_studies']}")
     print(f"  modalities        : {m['modalities']}")
@@ -68,16 +79,22 @@ def _preflight(idx: IndexResult, protocol=None) -> bool:
     return ok
 
 
+def _index(args) -> IndexResult:
+    return build_index(args.root, patient_regexes=args.patient_regex, group_by=args.group_by,
+                       progress=True, workers=args.workers, cache=args.cache,
+                       assume_immutable=args.assume_immutable, exclude_dirs=args.exclude_dir)
+
+
 def _cmd_index(args) -> int:
-    idx = build_index(args.root, patient_regexes=args.patient_regex, group_by=args.group_by, progress=True, workers=args.workers, cache=args.cache, assume_immutable=args.assume_immutable)
+    idx = _index(args)
     _preflight(idx)
     if args.dry_run:
         return 0
     if args.out_csv:
-        idx.table.to_csv(args.out_csv, index=False)
+        atomic_write_text(args.out_csv, idx.table.to_csv(index=False))
         print("Index table ->", args.out_csv)
     manifest_path = args.out_manifest or "index_manifest.json"
-    Path(manifest_path).write_text(json.dumps(idx.manifest, indent=2), encoding="utf-8")
+    atomic_write_text(manifest_path, json.dumps(idx.manifest, indent=2))
     print("Manifest ->", manifest_path)
     return 0
 
@@ -87,13 +104,12 @@ def _write_verdicts_json(rollup_df, manifest, protocol, path) -> None:
     payload = build_verdict_payload(rollup_df, manifest=manifest,
                                     protocol_name=getattr(protocol, "name", None))
     validate_payload(payload)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=2, ensure_ascii=False)
+    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
     print("Verdicts (JSON) ->", path)
 
 
 def _cmd_rt_check(args) -> int:
-    idx = build_index(args.root, patient_regexes=args.patient_regex, group_by=args.group_by, progress=True, workers=args.workers, cache=args.cache, assume_immutable=args.assume_immutable)
+    idx = _index(args)
     ok = _preflight(idx)
     if args.dry_run:
         return 0
@@ -118,8 +134,8 @@ def _cmd_rt_check(args) -> int:
         print("\n=== Per-study detail (RT studies) ===")
         print(rt[cols].to_string(index=False))
     if args.out_csv:
-        df.to_csv(args.out_csv, index=False)
-        rollup.to_csv(args.out_csv.replace(".csv", "_by_patient.csv"), index=False)
+        atomic_write_text(args.out_csv, df.to_csv(index=False))
+        atomic_write_text(args.out_csv.replace(".csv", "_by_patient.csv"), rollup.to_csv(index=False))
         print(f"\nCSV (per study) -> {args.out_csv}")
         print(f"CSV (per patient) -> {args.out_csv.replace('.csv', '_by_patient.csv')}")
     if args.json_out:
@@ -129,7 +145,7 @@ def _cmd_rt_check(args) -> int:
 
 def _cmd_completeness(args) -> int:
     protocol = load_protocol(args.protocol) if args.protocol else DEFAULT_PROTOCOL
-    idx = build_index(args.root, patient_regexes=args.patient_regex, group_by=args.group_by, progress=True, workers=args.workers, cache=args.cache, assume_immutable=args.assume_immutable)
+    idx = _index(args)
     ok = _preflight(idx, protocol)
     if args.dry_run:
         return 0
@@ -144,7 +160,7 @@ def _cmd_completeness(args) -> int:
 
 def _cmd_report(args) -> int:
     protocol = load_protocol(args.protocol) if args.protocol else DEFAULT_PROTOCOL
-    idx = build_index(args.root, patient_regexes=args.patient_regex, group_by=args.group_by, progress=True, workers=args.workers, cache=args.cache, assume_immutable=args.assume_immutable)
+    idx = _index(args)
     ok = _preflight(idx, protocol)
     if args.dry_run:
         return 0
@@ -158,6 +174,16 @@ def _cmd_report(args) -> int:
     if args.json_out:
         _write_verdicts_json(rollup_df, idx.manifest, protocol, args.json_out)
     return 0
+
+
+def _cmd_job(args) -> int:
+    from .job import run_job
+
+    if args.dry_run:  # check the mount / keying from the NAS without writing anything
+        protocol = load_protocol(args.protocol) if args.protocol else DEFAULT_PROTOCOL
+        _preflight(_index(args), protocol)
+        return 0
+    return run_job(args, _preflight)
 
 
 def _cmd_demo(args) -> int:
@@ -204,6 +230,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="warm-cache fast path FOR IMMUTABLE/APPEND-ONLY ARCHIVES ONLY: with "
                              "--cache, skip per-file stat and key the cache by path alone. New files "
                              "are still read; files modified in place are NOT re-read.")
+        sp.add_argument("--exclude-dir", action="append", default=[], metavar="PATTERN",
+                        help="skip directories whose name matches this glob (repeatable). NAS "
+                             "recycle bins, snapshots and thumbnail folders are always skipped.")
         sp.add_argument("--dry-run", action="store_true", help="preflight only; write nothing")
 
     d = sub.add_parser("demo", help="generate synthetic cohorts and run everything")
@@ -239,6 +268,19 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--json", default=None, dest="json_out",
                     help="also write the versioned, schema-validated verdict payload (JSON)")
     rp.set_defaults(func=_cmd_report)
+
+    j = sub.add_parser("job", help="unattended scheduled run (NAS / server): run folder + latest/ + status")
+    _common(j)
+    j.add_argument("--output-dir", required=True,
+                   help="where runs/, latest/, last_run.json and the index cache are written")
+    j.add_argument("--protocol", default=None, help="protocol YAML (default: brain_rt_followup)")
+    j.add_argument("--keep", type=int, default=30,
+                   help="number of run folders to keep (default 30; 0 = keep all)")
+    j.add_argument("--no-cache", action="store_true",
+                   help="do not use the index cache (default: <output-dir>/.cache/index_cache.pkl)")
+    j.add_argument("--stale-lock-hours", type=float, default=24.0,
+                   help="take over a lock older than this, left by a crashed run (default 24)")
+    j.set_defaults(func=_cmd_job)
     return p
 
 
