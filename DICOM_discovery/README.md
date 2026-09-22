@@ -165,10 +165,12 @@ Run against a real brain-RT trial export, the tool surfaced things a naive scan 
 - Patients have **7.5 studies on average** (longitudinal MR follow-up). Only **102 of 731
   studies actually contain an RT object**; the other 629 are follow-up MR and are reported
   as `NOT_RT` (out of scope) instead of being wrongly flagged "incomplete RT chain".
-- **Per-patient verdict** (the unit a PI cares about): **96 OK / 3 WARN / 3 INCOMPLETE**
-  over 97 patients with RT; 1 patient is imaging-only (`NO_RT`). One patient's RT chain is
-  *fragmented* across several studies — reported as a single honest verdict
-  ("`INCOMPLETE: missing RTDOSE; FRAGMENTED across N studies`"), not as confusing
+- **Verdicts of that run (June 2026):** **96 OK / 3 WARN / 3 INCOMPLETE** over the **102 RT
+  studies**; per patient, **97 of the 98 carry RT objects** and 1 is imaging-only (`NO_RT`).
+  The per-patient rollup — the unit a PI cares about, and what the report leads with — was
+  not recorded here; re-run `rt-check` on the cohort to quote it.
+- One patient's RT chain is *fragmented* across several studies — reported as a single honest
+  verdict ("`INCOMPLETE: missing RTDOSE; FRAGMENTED across N studies`"), not as confusing
   per-study noise, by reconciling the chain through resolved referenced UIDs.
 
 ## Longitudinal completeness — observed vs. expected
