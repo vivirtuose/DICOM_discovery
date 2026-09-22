@@ -62,7 +62,7 @@ python file_discovery_runner.py \
 
 ## `DICOM_discovery/` — Version en développement
 
-Package Python structuré (`src/` layout), versionné, compatible **Python 3.9→3.13**, avec tests automatisés (180 tests, pytest) et CLI installable en **une commande**.
+Package Python structuré (`src/` layout), versionné, compatible **Python 3.9→3.13**, avec tests automatisés (183 tests, pytest) et CLI installable en **une commande**.
 
 **Fonctionnalités ajoutées par rapport à `file_discovery/` :**
 - Index DICOM par tags (PatientID, Modality, SeriesInstanceUID)

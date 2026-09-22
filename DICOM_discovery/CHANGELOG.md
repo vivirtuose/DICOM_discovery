@@ -29,7 +29,7 @@ schedule. RUO throughout.
   read-only DICOM mount, capped RAM/CPU), `.env.example`, an offline `install-offline.sh`
   and systemd timer units; French guide `docs/NAS_DEPLOYMENT.md`. New **NAS bundle** CI
   workflow builds the image (amd64 + arm64), smoke-tests it under NAS constraints and uploads
-  `docker load`-able tarballs plus offline wheelhouses for Python 3.9–3.13. 180 tests.
+  `docker load`-able tarballs plus offline wheelhouses for Python 3.9–3.13. 183 tests.
 
 ## 0.8.0 — multi-Python packaging + synthetic-data CI proof-of-work (2026-07-23)
 Makes the package portable, installable in one command, and self-proving in CI. RUO throughout.

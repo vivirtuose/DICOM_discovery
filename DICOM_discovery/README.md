@@ -264,5 +264,5 @@ protocol.brain_rt_followup.yaml       # example expected-content protocol
 Dockerfile                            # hardened NAS image (default command = `job`)
 deploy/nas/                           # docker-compose + .env, offline installer, systemd units
 docs/NAS_DEPLOYMENT.md                # NAS deployment guide (French)
-tests/                                # pytest suite (180 tests), synthetic + real public data
+tests/                                # pytest suite (183 tests), synthetic + real public data
 ```
