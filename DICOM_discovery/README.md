@@ -46,7 +46,10 @@ pip install "git+https://github.com/vivirtuose/DICOM_discovery.git#subdirectory=
 dicom-discovery --help
 ```
 
-No internet on the target machine? Every release ships `docker load`-able images and offline
+No Python on the target machine? Every release also ships a **standalone binary** for
+Windows, macOS and Linux — unzip, double-click, pick the two folders
+([docs/STANDALONE.md](https://github.com/vivirtuose/DICOM_discovery/blob/master/DICOM_discovery/docs/STANDALONE.md)).
+No internet either? Every release ships `docker load`-able images and offline
 pip wheelhouses for Linux, Windows and macOS — see the
 [NAS deployment guide](https://github.com/vivirtuose/DICOM_discovery/blob/master/DICOM_discovery/docs/NAS_DEPLOYMENT.md).
 
@@ -283,12 +286,15 @@ src/DICOM_discovery/
     cli.py / __main__.py # `dicom-discovery` commands: demo / index / rt-check / completeness / report / job / doctor
     job.py               # unattended scheduled run (run folders, latest/, status, lock, retention)
     doctor.py            # environment report + share/output probes (`doctor`)
+    gui.py               # double-click launcher for the standalone binary (folder pickers)
     fsutil.py            # atomic writes (outputs and cache on network shares)
     synthetic.py         # synthetic DICOM-RT + longitudinal cohorts (+ ground truth)
 protocol.brain_rt_followup.yaml       # example expected-content protocol
 Dockerfile                            # hardened NAS image (default command = `job`)
 deploy/nas/                           # docker-compose + .env, offline installer, systemd units
 docs/NAS_DEPLOYMENT.md                # NAS deployment guide (French)
+deploy/standalone/                    # PyInstaller spec + entry point for the frozen binary
 docs/RELEASING.md                     # how a version is tagged, drafted and published
-tests/                                # pytest suite (199 tests), synthetic + real public data
+docs/STANDALONE.md                    # the no-Python, double-click path (French)
+tests/                                # pytest suite (209 tests), synthetic + real public data
 ```

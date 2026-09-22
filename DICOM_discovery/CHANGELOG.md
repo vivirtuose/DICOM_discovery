@@ -4,6 +4,22 @@ All notable changes to **DICOM_discovery**. The package began as a single-instit
 data-curation script and was rebuilt, in council-reviewed increments, into an adaptive
 cohort-QC tool.
 
+## 0.11.0 — runs on a machine with no Python: standalone binaries + double-click launcher (2026-09-22)
+- **One self-contained executable per OS** (Windows `.exe`, macOS arm64, Linux x86_64), built
+  by PyInstaller from `deploy/standalone/dicom-discovery.spec`. It embeds Python, pydicom,
+  pandas and — critically — plotly's JS bundle, so the report it writes still opens on an
+  air-gapped machine. ~50 MB, no installation, no admin rights.
+- **Double-click launcher** (`gui.py`): a frozen binary started with no arguments no longer
+  hits argparse's "arguments are required" in a window that closes instantly. It asks for the
+  DICOM folder and the output folder (tkinter picker, typed-path fallback), runs the ordinary
+  `job`, opens the report and holds the window open. Called *with* arguments — from a
+  scheduler — it behaves exactly like the installed CLI. `--gui` forces it without freezing.
+- **CI `binaries.yml`** builds all three, runs each produced binary (`--version`, `doctor`,
+  `demo`, a full `job`) and asserts the report references no external script or stylesheet —
+  the failure mode a frozen build hides. `release.yml` ships them as release assets.
+- **`docs/STANDALONE.md`** (French): download, SmartScreen/Gatekeeper on unsigned binaries,
+  the double-click flow, and the limits (size, start-up time, one file per architecture).
+
 ## 0.10.0 — installable from anywhere: PyPI-ready, signed-off releases, per-OS offline bundles (2026-09-22)
 - **Release pipeline.** Pushing a tag `vX.Y.Z` runs `release.yml`: it refuses a tag that
   disagrees with `pyproject.toml`, builds the sdist + wheel, runs `twine check`, installs the

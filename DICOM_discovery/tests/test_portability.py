@@ -43,6 +43,22 @@ def test_doctor_reports_the_environment_a_bug_report_needs(capsys):
         assert expected in out, expected
 
 
+def test_doctor_reports_whether_the_folder_picker_works(capsys):
+    """The standalone binary's double-click flow needs tkinter; doctor must say whether this
+    machine (or this frozen build) actually has it."""
+    main(["doctor"])
+    assert "folder picker" in capsys.readouterr().out
+
+
+def test_doctor_notes_when_the_folder_picker_is_unavailable(monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "tkinter", None)  # a trimmed Python without tkinter
+
+    main(["doctor"])
+
+    out = capsys.readouterr().out
+    assert "folder picker" in out and "typed" in out
+
+
 def test_doctor_fails_when_the_dicom_root_is_unreadable(tmp_path, capsys):
     rc = main(["doctor", "--root", str(tmp_path / "not_mounted")])
     assert rc == 1

@@ -5,8 +5,8 @@
 # `--network none`, the DICOM share mounted read-only on /data and a writable /output
 # (see deploy/nas/docker-compose.yml and docs/NAS_DEPLOYMENT.md).
 #
-#   docker build -t dicom-discovery:0.10.0 .
-#   docker run --rm --network none -v /volume1/DICOM:/data:ro -v /volume1/qc:/output dicom-discovery:0.10.0
+#   docker build -t dicom-discovery:0.11.0 .
+#   docker run --rm --network none -v /volume1/DICOM:/data:ro -v /volume1/qc:/output dicom-discovery:0.11.0
 
 ARG PYTHON_VERSION=3.12
 

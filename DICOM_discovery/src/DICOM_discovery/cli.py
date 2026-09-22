@@ -320,6 +320,15 @@ def _force_utf8_stdio() -> None:
 
 def main(argv=None) -> int:
     _force_utf8_stdio()
+    # A double-clicked standalone binary passes no arguments: hand it to the interactive
+    # launcher instead of letting argparse exit 2 into a window that closes at once.
+    argv_list = list(sys.argv[1:] if argv is None else argv)
+    from .gui import should_launch_gui
+
+    if should_launch_gui(argv_list, frozen=bool(getattr(sys, "frozen", False))):
+        from . import gui
+
+        return gui.run_interactive()
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")

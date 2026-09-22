@@ -60,6 +60,18 @@ def test_deployment_files_reference_the_current_version():
     assert f"DD_VERSION={__version__}" in (NAS / ".env.example").read_text(encoding="utf-8")
 
 
+def test_standalone_spec_keeps_the_report_self_contained():
+    """The frozen binary must carry plotly's JS bundle: without it the build succeeds and the
+    report silently loses its chart. Also no UPX (a frequent antivirus false positive) and a
+    console (the double-click flow prints progress and holds the window open)."""
+    standalone = _ROOT / "deploy" / "standalone"
+    spec = (standalone / "dicom-discovery.spec").read_text(encoding="utf-8")
+    assert "collect_all(package)" in spec and '"plotly"' in spec
+    assert "upx=False" in spec
+    assert "console=True" in spec
+    assert (standalone / "entry.py").exists()
+
+
 @pytest.mark.parametrize("script_name", ["install-offline.sh", "install-offline.ps1"])
 def test_offline_installer_never_reaches_an_index(script_name):
     """Both installers (POSIX and Windows) must work on a machine with no package index."""

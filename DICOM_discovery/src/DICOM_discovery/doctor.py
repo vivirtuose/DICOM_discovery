@@ -62,6 +62,21 @@ def _windows_long_paths_enabled() -> Optional[bool]:
         return None
 
 
+def _folder_picker_available() -> bool:
+    """Whether the double-click flow can show a folder picker (tkinter present).
+
+    Importing tkinter opens no window; only instantiating ``Tk()`` would. A trimmed Python or
+    a Linux build without the Tk bindings falls back to typed paths, which is usable but worth
+    knowing before handing the binary to someone.
+    """
+    try:
+        import tkinter  # noqa: F401
+        from tkinter import filedialog  # noqa: F401
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
 def _check_readable(root: str) -> Tuple[bool, str]:
     path = Path(root)
     if not path.exists():
@@ -109,6 +124,8 @@ def run_doctor(root: Optional[str] = None, output_dir: Optional[str] = None) -> 
     elif long_paths is True:
         print("Windows paths    : long paths enabled")
 
+    picker = "available" if _folder_picker_available() else "not available — the double-click flow asks for typed paths"
+    print(f"folder picker    : {picker}")
     print("Dependencies     :")
     for name, version in _dependency_versions():
         print(f"  {name:<11}      {version}")

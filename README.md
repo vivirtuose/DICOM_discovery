@@ -62,7 +62,7 @@ python file_discovery_runner.py \
 
 ## `DICOM_discovery/` — Version en développement
 
-Package Python structuré (`src/` layout), versionné, compatible **Python 3.9→3.14**, avec tests automatisés (199 tests, pytest) et CLI installable en **une commande**.
+Package Python structuré (`src/` layout), versionné, compatible **Python 3.9→3.14**, avec tests automatisés (209 tests, pytest) et CLI installable en **une commande**.
 
 **Fonctionnalités ajoutées par rapport à `file_discovery/` :**
 - Index DICOM par tags (PatientID, Modality, SeriesInstanceUID)
@@ -109,6 +109,13 @@ Deux voies, **sans accès Internet requis sur le NAS**, construites et testées 
 - **Serveur Linux montant le partage** — *wheelhouse* pip hors-ligne + timer systemd.
 
 Guide pas à pas : [`DICOM_discovery/docs/NAS_DEPLOYMENT.md`](DICOM_discovery/docs/NAS_DEPLOYMENT.md).
+
+### Poste sans Python
+
+Chaque version publie aussi un **exécutable autonome** (Windows / macOS / Linux) : on
+décompresse, on double-clique, on désigne le dossier DICOM et le dossier de sortie, le
+rapport s'ouvre tout seul. Guide :
+[`DICOM_discovery/docs/STANDALONE.md`](DICOM_discovery/docs/STANDALONE.md).
 
 ---
 

@@ -73,9 +73,14 @@ jobs:
     needs: check-tag
     uses: ./.github/workflows/nas-bundle.yml
 
+  binaries:
+    name: standalone binaries
+    needs: check-tag
+    uses: ./.github/workflows/binaries.yml
+
   draft-release:
     name: draft GitHub release
-    needs: [dist, bundle]
+    needs: [dist, bundle, binaries]
     # Only a tag produces a release. A manual dispatch (on a branch) still builds and proves
     # everything above, but must not create a release named after the branch.
     if: github.ref_type == 'tag'
@@ -91,7 +96,7 @@ jobs:
         run: |
           set -eu
           mkdir -p release
-          find assets -type f \( -name '*.whl' -o -name '*.tar.gz' \) -exec cp {} release/ \;
+          find assets -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release/ \;
           cd release
           sha256sum * > SHA256SUMS.txt
           ls -la
@@ -106,6 +111,10 @@ jobs:
             "Research Use Only — not a medical device." \
             "" \
             "**Install:** \`pip install dicom-discovery\` (once published to PyPI) or download a wheel below." \
+            "" \
+            "**No Python on the machine?** \`*-windows-amd64.zip\` / \`*-macos-arm64.tar.gz\` / \`*-linux-x86_64.tar.gz\`" \
+            "are standalone binaries — unzip and double-click (docs/STANDALONE.md). They are unsigned, so" \
+            "SmartScreen/Gatekeeper warn on first launch." \
             "" \
             "**Air-gapped / hospital NAS:** \`dicom-discovery-*-amd64.tar.gz\` / \`-arm64.tar.gz\` are \`docker load\`-able images;" \
             "\`*-wheelhouse-py3.X-*.tar.gz\` install without any package index (see the NAS deployment guide)." \

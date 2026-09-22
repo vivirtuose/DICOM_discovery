@@ -1,0 +1,107 @@
+name: Standalone binaries
+
+# One self-contained executable per OS, for a machine with **no Python at all** — the case
+# where someone double-clicks the file. Each binary is exercised here exactly as a user would
+# (version, doctor, demo, a full job) and the produced report is checked for external
+# references, because the embedded Plotly bundle is the thing a frozen build silently loses.
+#
+# The binaries are NOT code-signed: Windows SmartScreen and macOS Gatekeeper will warn on
+# first launch (see docs/STANDALONE.md).
+on:
+  push:
+    branches: [master, standalone-binaries] # standalone-binaries: temporary, to prove the three builds before merging
+    paths:
+      - "DICOM_discovery/**"
+      - ".github/workflows/binaries.yml"
+  pull_request:
+    paths:
+      - "DICOM_discovery/**"
+      - ".github/workflows/binaries.yml"
+  workflow_dispatch:
+  workflow_call: # release.yml ships these as release assets
+
+defaults:
+  run:
+    shell: bash
+    working-directory: DICOM_discovery
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, platform: linux-x86_64, binary: dicom-discovery }
+          - { os: windows-latest, platform: windows-amd64, binary: dicom-discovery.exe }
+          - { os: macos-latest, platform: macos-arm64, binary: dicom-discovery }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the package and PyInstaller
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          pip install .
+
+      - name: Freeze
+        run: pyinstaller --clean --noconfirm --distpath dist --workpath build/standalone deploy/standalone/dicom-discovery.spec
+
+      - name: Run the binary as a user would
+        run: |
+          set -eu
+          BIN="dist/${{ matrix.binary }}"
+          "$BIN" --version
+          "$BIN" doctor
+          "$BIN" demo --out-dir "$RUNNER_TEMP/demo"
+          "$BIN" job --root "$RUNNER_TEMP/demo/longitudinal_cohort" --output-dir "$RUNNER_TEMP/out"
+          test -s "$RUNNER_TEMP/out/latest/cohort_report.html"
+
+      - name: The report must still be self-contained (embedded Plotly, no fetches)
+        run: |
+          python - "$RUNNER_TEMP/out/latest/cohort_report.html" <<'PY'
+          import re, sys, pathlib
+          html = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+          external = (re.findall(r'<script[^>]*\ssrc=["\']([^"\']+)', html, re.I)
+                      + re.findall(r'<link[^>]*\shref=["\']([^"\']+)', html, re.I))
+          assert not external, f"report fetches external resources: {external}"
+          assert "Plotly.newPlot" in html and len(html) > 3_000_000, "plotly bundle missing from the frozen build"
+          print(f"self-contained report OK ({len(html)/1e6:.1f} MB)")
+          PY
+
+      - name: Package (POSIX)
+        if: runner.os != 'Windows'
+        id: pkg_posix
+        run: |
+          set -eu
+          V=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+          NAME="dicom-discovery-$V-${{ matrix.platform }}"
+          cp ../LICENSE docs/STANDALONE.md dist/
+          tar -czf "$NAME.tar.gz" -C dist .
+          python -c "import hashlib,sys;p=sys.argv[1];print(hashlib.sha256(open(p,'rb').read()).hexdigest(),' ',p)" "$NAME.tar.gz" | tee "$NAME.tar.gz.sha256"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        id: pkg_win
+        run: |
+          set -eu
+          V=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+          NAME="dicom-discovery-$V-${{ matrix.platform }}"
+          cp ../LICENSE docs/STANDALONE.md dist/
+          powershell -Command "Compress-Archive -Path dist/* -DestinationPath '$NAME.zip' -Force"
+          python -c "import hashlib,sys;p=sys.argv[1];print(hashlib.sha256(open(p,'rb').read()).hexdigest(),' ',p)" "$NAME.zip" | tee "$NAME.zip.sha256"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg_posix.outputs.name || steps.pkg_win.outputs.name }}-standalone
+          path: |
+            DICOM_discovery/dicom-discovery-*.tar.gz*
+            DICOM_discovery/dicom-discovery-*.zip*
+          if-no-files-found: error
+          retention-days: 90
