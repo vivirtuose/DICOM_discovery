@@ -7,7 +7,7 @@ name: NAS bundle
 # Synthetic data only — no PHI ever reaches CI.
 on:
   push:
-    branches: [master, nas-deployment, release-pipeline] # release-pipeline: temporary, to prove the new per-OS wheelhouses before merging
+    branches: [master, nas-deployment]
     tags: ["v*"]
     paths:
       - "DICOM_discovery/**"

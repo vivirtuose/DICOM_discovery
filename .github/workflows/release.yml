@@ -76,6 +76,9 @@ jobs:
   draft-release:
     name: draft GitHub release
     needs: [dist, bundle]
+    # Only a tag produces a release. A manual dispatch (on a branch) still builds and proves
+    # everything above, but must not create a release named after the branch.
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
