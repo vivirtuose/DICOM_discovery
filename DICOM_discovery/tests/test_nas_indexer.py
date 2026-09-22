@@ -182,6 +182,18 @@ def test_parallel_reads_stream_with_a_bounded_window():
     assert [first] + rest == [i * 2 for i in range(1000)]  # order preserved, nothing lost
 
 
+def test_slices_of_one_series_share_their_uid_strings(cohort):
+    """~1M slice records are held in memory during a scan (1.3 GB measured). Values common
+    to a whole series must be one shared object, not one copy per slice (~0.9 GB)."""
+    from DICOM_discovery.indexer import read_instance
+
+    # Two independent reads stand in for two slices of the same series (same header values).
+    a, _ = read_instance(str(cohort / "P001" / "ct.dcm"))
+    b, _ = read_instance(str(cohort / "P001" / "ct.dcm"))
+    for key in ("study_uid", "series_uid", "frame_of_reference", "patient_id", "sop_class_uid"):
+        assert a[key] == b[key] and a[key] is b[key], key
+
+
 def test_report_topbar_flags_a_partial_scan():
     """The HTML a clinician opens must itself say the scan was partial."""
     from DICOM_discovery.report_cohort import _topbar_html
