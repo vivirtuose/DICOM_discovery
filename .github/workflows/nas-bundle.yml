@@ -17,6 +17,7 @@ on:
       - "DICOM_discovery/**"
       - ".github/workflows/nas-bundle.yml"
   workflow_dispatch:
+  workflow_call: # used by release.yml so a tag ships the same, already-proven artifacts
 
 jobs:
   image:
@@ -93,14 +94,29 @@ jobs:
           retention-days: 90
 
   wheelhouse:
-    name: offline wheelhouse (py${{ matrix.python }})
-    runs-on: ubuntu-latest
+    # Offline pip bundles: every wheel (package + dependencies + a recent pip) for one
+    # Python version on one platform, installable with no package index at all. Linux covers
+    # the NAS/server target across the whole supported range; Windows and macOS get the two
+    # versions a laptop is most likely to have.
+    name: wheelhouse (py${{ matrix.python }}, ${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - { os: ubuntu-latest, python: "3.9", platform: linux-x86_64 }
+          - { os: ubuntu-latest, python: "3.10", platform: linux-x86_64 }
+          - { os: ubuntu-latest, python: "3.11", platform: linux-x86_64 }
+          - { os: ubuntu-latest, python: "3.12", platform: linux-x86_64 }
+          - { os: ubuntu-latest, python: "3.13", platform: linux-x86_64 }
+          - { os: ubuntu-latest, python: "3.14", platform: linux-x86_64 }
+          - { os: windows-latest, python: "3.12", platform: windows-amd64 }
+          - { os: windows-latest, python: "3.13", platform: windows-amd64 }
+          - { os: macos-latest, python: "3.12", platform: macos-arm64 }
+          - { os: macos-latest, python: "3.13", platform: macos-arm64 }
     defaults:
       run:
+        shell: bash
         working-directory: DICOM_discovery
     steps:
       - uses: actions/checkout@v4
@@ -116,26 +132,42 @@ jobs:
           mkdir -p bundle/wheelhouse
           pip wheel . --wheel-dir bundle/wheelhouse
           pip download pip --only-binary=:all: --dest bundle/wheelhouse
-          cp deploy/nas/install-offline.sh protocol.brain_rt_followup.yaml bundle/
+          cp deploy/nas/install-offline.sh deploy/nas/install-offline.ps1 protocol.brain_rt_followup.yaml bundle/
           ls bundle/wheelhouse
 
-      - name: Prove the offline install works (no package index)
+      - name: Prove the offline install works — POSIX installer (no package index)
+        if: runner.os != 'Windows'
         run: |
           set -eu
           PIP_NO_INDEX=1 sh bundle/install-offline.sh "$RUNNER_TEMP/dd"
           DD="$RUNNER_TEMP/dd/venv/bin/dicom-discovery"
+          "$DD" --version
           "$DD" demo --out-dir "$RUNNER_TEMP/demo"
           "$DD" job --root "$RUNNER_TEMP/demo/longitudinal_cohort" --output-dir "$RUNNER_TEMP/out"
           test -s "$RUNNER_TEMP/out/latest/cohort_report.html"
+
+      - name: Prove the offline install works — Windows installer (no package index)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: DICOM_discovery
+        run: |
+          $env:PIP_NO_INDEX = "1"
+          $dest = Join-Path $env:RUNNER_TEMP "dd"
+          & ./bundle/install-offline.ps1 -Dest $dest
+          $dd = Join-Path $dest "venv/Scripts/dicom-discovery.exe"
+          & $dd --version
+          & $dd demo --out-dir (Join-Path $env:RUNNER_TEMP "demo")
+          & $dd job --root (Join-Path $env:RUNNER_TEMP "demo/longitudinal_cohort") --output-dir (Join-Path $env:RUNNER_TEMP "out")
+          if (-not (Test-Path (Join-Path $env:RUNNER_TEMP "out/latest/cohort_report.html"))) { throw "no report produced" }
 
       - name: Package
         id: pkg
         run: |
           set -eu
           V=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
-          NAME="dicom-discovery-$V-wheelhouse-py${{ matrix.python }}-linux-x86_64"
+          NAME="dicom-discovery-$V-wheelhouse-py${{ matrix.python }}-${{ matrix.platform }}"
           tar -czf "$NAME.tar.gz" -C bundle .
-          sha256sum "$NAME.tar.gz" | tee "$NAME.tar.gz.sha256"
+          python -c "import hashlib,sys; p=sys.argv[1]; print(hashlib.sha256(open(p,'rb').read()).hexdigest(), ' ', p)" "$NAME.tar.gz" | tee "$NAME.tar.gz.sha256"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4

@@ -1,0 +1,114 @@
+name: Release
+
+# Triggered by pushing a version tag (`git tag v0.9.2 && git push origin v0.9.2`).
+# It builds everything a release needs, proves the wheel installs and runs from clean, and
+# collects it all into a **draft** GitHub Release. Nothing becomes public until a human opens
+# that draft and clicks Publish — and publishing is what triggers the PyPI upload
+# (publish-pypi.yml), which is irreversible.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the draft release
+
+jobs:
+  check-tag:
+    name: tag matches the package version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare the tag with pyproject.toml
+        run: |
+          set -eu
+          VERSION=$(grep -m1 '^version' DICOM_discovery/pyproject.toml | cut -d'"' -f2)
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=$TAG  pyproject=$VERSION"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::tag $TAG does not match the package version v$VERSION — "\
+                 "bump DICOM_discovery/pyproject.toml (and __init__.py) or retag"
+            exit 1
+          fi
+
+  dist:
+    name: sdist + wheel
+    needs: check-tag
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: DICOM_discovery
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check dist/*
+
+      - name: Install the built wheel from clean and run it
+        run: |
+          set -eu
+          python -m venv "$RUNNER_TEMP/clean"
+          "$RUNNER_TEMP/clean/bin/pip" install --quiet dist/*.whl
+          DD="$RUNNER_TEMP/clean/bin/dicom-discovery"
+          "$DD" --version
+          "$DD" doctor
+          "$DD" demo --out-dir "$RUNNER_TEMP/demo"
+          "$DD" job --root "$RUNNER_TEMP/demo/longitudinal_cohort" --output-dir "$RUNNER_TEMP/out"
+          test -s "$RUNNER_TEMP/out/latest/cohort_report.html"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: DICOM_discovery/dist/*
+          if-no-files-found: error
+
+  bundle:
+    name: NAS bundle
+    needs: check-tag
+    uses: ./.github/workflows/nas-bundle.yml
+
+  draft-release:
+    name: draft GitHub release
+    needs: [dist, bundle]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+
+      - name: Collect the assets and their checksums
+        run: |
+          set -eu
+          mkdir -p release
+          find assets -type f \( -name '*.whl' -o -name '*.tar.gz' \) -exec cp {} release/ \;
+          cd release
+          sha256sum * > SHA256SUMS.txt
+          ls -la
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          NOTES=$(printf '%s\n' \
+            "Research Use Only — not a medical device." \
+            "" \
+            "**Install:** \`pip install dicom-discovery\` (once published to PyPI) or download a wheel below." \
+            "" \
+            "**Air-gapped / hospital NAS:** \`dicom-discovery-*-amd64.tar.gz\` / \`-arm64.tar.gz\` are \`docker load\`-able images;" \
+            "\`*-wheelhouse-py3.X-*.tar.gz\` install without any package index (see the NAS deployment guide)." \
+            "Verify downloads against SHA256SUMS.txt." \
+            "" \
+            "See DICOM_discovery/CHANGELOG.md for what changed.")
+          gh release create "$TAG" release/* --draft --title "$TAG" --notes "$NOTES" \
+            || gh release upload "$TAG" release/* --clobber
+          echo "Draft release created — review it, then Publish to trigger the PyPI upload."

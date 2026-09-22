@@ -37,10 +37,18 @@ Runs on **Python 3.9–3.14**, tested in CI on Linux, macOS and Windows. One com
 no clone needed (the package lives in the `DICOM_discovery/` subdirectory of the repo):
 
 ```bash
+# From PyPI — available once the first release is published (see docs/RELEASING.md):
+pip install dicom-discovery          # or: pipx install dicom-discovery (isolated CLI)
+
+# Until then (or to track master), straight from GitHub — no clone needed:
 pip install "git+https://github.com/vivirtuose/DICOM_discovery.git#subdirectory=DICOM_discovery"
 
 dicom-discovery --help
 ```
+
+No internet on the target machine? Every release ships `docker load`-able images and offline
+pip wheelhouses for Linux, Windows and macOS — see the
+[NAS deployment guide](https://github.com/vivirtuose/DICOM_discovery/blob/master/DICOM_discovery/docs/NAS_DEPLOYMENT.md).
 
 The interactive Plotly report is a **core dependency**, so `dicom-discovery report` works out
 of the box — there is no separate visualisation step to install. For development, clone the
@@ -64,13 +72,13 @@ Two air-gapped deployment paths, both built and tested in CI (workflow **NAS bun
 downloadable as artifacts:
 
 - **Container on the NAS** (Synology Container Manager, QNAP, TrueNAS): a hardened image
-  (`amd64` + `arm64`) run via [`deploy/nas/docker-compose.yml`](deploy/nas/docker-compose.yml)
+  (`amd64` + `arm64`) run via [`deploy/nas/docker-compose.yml`](https://github.com/vivirtuose/DICOM_discovery/blob/master/DICOM_discovery/deploy/nas/docker-compose.yml)
   with no network, the DICOM share mounted read-only, a read-only root filesystem and a
   non-root user.
 - **Linux server mounting the share**: an offline pip wheelhouse per Python version +
-  [`install-offline.sh`](deploy/nas/install-offline.sh) and systemd timer units.
+  [`install-offline.sh`](https://github.com/vivirtuose/DICOM_discovery/blob/master/DICOM_discovery/deploy/nas/install-offline.sh) and systemd timer units.
 
-Step-by-step guide (French, for the hospital team): [`docs/NAS_DEPLOYMENT.md`](docs/NAS_DEPLOYMENT.md).
+Step-by-step guide (French, for the hospital team): [`docs/NAS_DEPLOYMENT.md`](https://github.com/vivirtuose/DICOM_discovery/blob/master/DICOM_discovery/docs/NAS_DEPLOYMENT.md).
 
 ## On an unfamiliar machine
 
@@ -281,5 +289,6 @@ protocol.brain_rt_followup.yaml       # example expected-content protocol
 Dockerfile                            # hardened NAS image (default command = `job`)
 deploy/nas/                           # docker-compose + .env, offline installer, systemd units
 docs/NAS_DEPLOYMENT.md                # NAS deployment guide (French)
-tests/                                # pytest suite (191 tests), synthetic + real public data
+docs/RELEASING.md                     # how a version is tagged, drafted and published
+tests/                                # pytest suite (199 tests), synthetic + real public data
 ```

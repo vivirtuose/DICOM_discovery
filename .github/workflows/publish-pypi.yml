@@ -1,0 +1,61 @@
+name: Publish to PyPI
+
+# Uploading to PyPI is IRREVERSIBLE: a version number can never be re-used, even after a
+# delete. So this workflow never runs on a push or on a tag — only when a human publishes a
+# GitHub release (the draft created by release.yml), or runs it by hand, optionally against
+# TestPyPI first.
+#
+# Authentication is PyPI **Trusted Publishing** (OIDC) — no API token is stored in this repo.
+# One-time setup by the maintainer, on https://pypi.org (and/or test.pypi.org):
+#   PyPI → Your projects → Publishing → Add a new pending publisher
+#     Owner: vivirtuose · Repository: DICOM_discovery
+#     Workflow name: publish-pypi.yml · Environment: pypi   (testpypi for TestPyPI)
+# Until that exists, this workflow fails on the upload step and nothing is published.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      index:
+        description: "Which index to upload to"
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: build and upload (${{ inputs.index || 'pypi' }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.index || 'pypi' }} # add reviewers/protection rules here if wanted
+    permissions:
+      id-token: write # Trusted Publishing
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist + wheel
+        working-directory: DICOM_discovery
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check dist/*
+
+      - name: Upload to TestPyPI
+        if: inputs.index == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: DICOM_discovery/dist
+          repository-url: https://test.pypi.org/legacy/
+
+      - name: Upload to PyPI
+        if: inputs.index != 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: DICOM_discovery/dist

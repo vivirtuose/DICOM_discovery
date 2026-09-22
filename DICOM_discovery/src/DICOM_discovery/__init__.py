@@ -38,4 +38,4 @@ from .synthetic import (  # noqa: F401
     generate_synthetic_cohort,
 )
 
-__version__ = "0.9.1"
+__version__ = "0.10.0"

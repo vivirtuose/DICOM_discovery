@@ -4,6 +4,22 @@ All notable changes to **DICOM_discovery**. The package began as a single-instit
 data-curation script and was rebuilt, in council-reviewed increments, into an adaptive
 cohort-QC tool.
 
+## 0.10.0 — installable from anywhere: PyPI-ready, signed-off releases, per-OS offline bundles (2026-09-22)
+- **Release pipeline.** Pushing a tag `vX.Y.Z` runs `release.yml`: it refuses a tag that
+  disagrees with `pyproject.toml`, builds the sdist + wheel, runs `twine check`, installs the
+  wheel in a clean venv and exercises `--version`/`doctor`/`demo`/`job` end to end, rebuilds
+  the NAS bundle, and gathers everything with a `SHA256SUMS.txt` into a **draft** GitHub
+  release. Release assets do not expire, unlike the 90-day Actions artifacts.
+- **PyPI publishing via Trusted Publishing** (`publish-pypi.yml`, OIDC — no API token in the
+  repo). It never runs on a push or a tag: only when a human publishes the GitHub release, or
+  dispatches it manually (with a TestPyPI rehearsal option). Setup: `docs/RELEASING.md`.
+- **Distribution metadata**: PEP 639 `license = "MIT"` + a real `LICENSE` file shipped in the
+  wheel, classifiers for Python 3.9–3.14 and the medical/research topics, project URLs, and a
+  README whose links are absolute so the PyPI page does not 404.
+- **Offline wheelhouses for Windows (`windows-amd64`) and macOS (`macos-arm64`)** beside the
+  six Linux ones, each proven by installing with no package index and running a full `job`;
+  new `deploy/nas/install-offline.ps1` is the Windows counterpart of the POSIX installer.
+
 ## 0.9.1 — portability: proven on Windows/macOS, environment doctor, Excel-safe CSVs (2026-09-22)
 - **CI now proves the claim.** The matrix adds **Python 3.14** and two extra legs per OS on
   **Windows** and **macOS** (oldest + newest supported Python). Until now the README promised

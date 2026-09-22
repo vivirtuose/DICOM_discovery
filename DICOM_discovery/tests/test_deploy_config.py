@@ -8,6 +8,7 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -59,7 +60,10 @@ def test_deployment_files_reference_the_current_version():
     assert f"DD_VERSION={__version__}" in (NAS / ".env.example").read_text(encoding="utf-8")
 
 
-def test_offline_installer_never_reaches_an_index():
-    script = (NAS / "install-offline.sh").read_text(encoding="utf-8")
-    installs = [ln for ln in script.splitlines() if "pip install" in ln and not ln.lstrip().startswith("#")]
+@pytest.mark.parametrize("script_name", ["install-offline.sh", "install-offline.ps1"])
+def test_offline_installer_never_reaches_an_index(script_name):
+    """Both installers (POSIX and Windows) must work on a machine with no package index."""
+    script = (NAS / script_name).read_text(encoding="utf-8")
+    installs = [ln for ln in script.splitlines()
+                if "pip install" in ln and not ln.lstrip().startswith("#")]
     assert installs and all("--no-index" in ln for ln in installs)
