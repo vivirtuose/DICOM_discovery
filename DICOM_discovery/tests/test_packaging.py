@@ -78,6 +78,16 @@ def test_release_workflow_checks_the_tag_matches_the_version():
     assert "does not match" in workflow
 
 
+def test_release_workflow_can_read_its_own_artifacts():
+    """An explicit `permissions:` block drops every scope it does not list. Collecting the
+    release assets calls the Actions API, which needs `actions: read` — its absence is what
+    failed the first v0.11.0 tag, at the very last step, after 30 minutes of green jobs."""
+    workflow = (_REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    permissions = workflow.split("jobs:", 1)[0]
+    assert "contents: write" in permissions  # create the release
+    assert "actions: read" in permissions    # download-artifact lists the run's artifacts
+
+
 def test_pypi_publish_is_never_automatic_on_push():
     """Publishing is irreversible: it must require an explicit, human action (a published
     GitHub release or a manual dispatch), never a push or a tag alone."""

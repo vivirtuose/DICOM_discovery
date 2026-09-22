@@ -12,6 +12,8 @@ on:
 
 permissions:
   contents: write # create the draft release
+  actions: read # download-artifact lists this run's artifacts via the Actions API; an
+  # explicit permissions block drops every scope it does not name.
 
 jobs:
   check-tag:
@@ -98,6 +100,8 @@ jobs:
           mkdir -p release
           find assets -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release/ \;
           cd release
+          # Never publish an empty release: if the artifacts did not arrive, stop here.
+          test "$(ls -1 | wc -l)" -ge 10
           sha256sum * > SHA256SUMS.txt
           ls -la
 
