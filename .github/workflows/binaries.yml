@@ -9,7 +9,7 @@ name: Standalone binaries
 # first launch (see docs/STANDALONE.md).
 on:
   push:
-    branches: [master, standalone-binaries] # standalone-binaries: temporary, to prove the three builds before merging
+    branches: [master]
     paths:
       - "DICOM_discovery/**"
       - ".github/workflows/binaries.yml"
