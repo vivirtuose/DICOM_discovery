@@ -48,3 +48,6 @@ skills-lock.json
 .idea/
 .DS_Store
 *.swp
+
+# SDD orchestration scratch (ledger, briefs, review packages)
+.superpowers/
