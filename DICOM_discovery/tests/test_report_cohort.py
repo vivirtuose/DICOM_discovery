@@ -395,12 +395,20 @@ class TestRenderCohortReport:
         assert 'data-panel="comp"' in html_text, "Completeness panel not found in HTML"
 
     def test_render_kpi_cards_present(self, rendered_html):
-        """KPI section must contain OK/WARN/INCOMPLETE/NO_RT verdict labels + cohort complete."""
+        """KPI section must contain OK/WARN/INCOMPLETE/NO_RT verdict labels + the completeness
+        strip, labelled distinctly from the Completeness tab's all-or-nothing count so the two
+        adjacent-looking numbers are not read as the same statistic."""
         html_text, _ = rendered_html
         assert 'class="kpis"' in html_text, "KPI section missing"
         for verdict in ("OK", "WARN", "INCOMPLETE", "NO_RT"):
             assert verdict in html_text, f"Verdict '{verdict}' not found in KPI section"
-        assert "cohort complete" in html_text, "'cohort complete' KPI label missing"
+        assert "mean per-patient completeness" in html_text, (
+            "'mean per-patient completeness' KPI label missing"
+        )
+        assert "cohort complete" not in html_text, (
+            "stale 'cohort complete' label found - it must not read as the same statistic "
+            "as the Completeness tab's 'patients complete' count"
+        )
 
     def test_render_topbar_ruo_disclaimer(self, rendered_html):
         """Topbar must contain the RUO disclaimer text."""
@@ -410,6 +418,34 @@ class TestRenderCohortReport:
             "RUO disclaimer missing from topbar"
         )
         assert 'class="topbar"' in html_text, "Topbar element missing"
+
+    def test_ruo_notice_is_byte_identical_in_report_and_standalone_page(self, rendered_html):
+        """The regulatory notice must read the same everywhere it ships.
+
+        report_cohort.py used to define its own RUO_TEXT with an em dash while
+        report_completeness.py used an ASCII hyphen - both shipped, so the cohort report and
+        the standalone `dicom-discovery completeness` page stated the notice differently. Would
+        fail again if either module reintroduced its own copy of the string instead of
+        importing the one definition.
+        """
+        from DICOM_discovery.completeness import DEFAULT_PROTOCOL
+        from DICOM_discovery.report_cohort import RUO_TEXT as COHORT_RUO_TEXT
+        from DICOM_discovery.report_completeness import (
+            RUO_TEXT as COMP_RUO_TEXT,
+        )
+        from DICOM_discovery.report_completeness import (
+            completeness_page_html,
+        )
+
+        assert COHORT_RUO_TEXT == COMP_RUO_TEXT == "Research Use Only - not a medical device."
+        assert chr(0x2014) not in COHORT_RUO_TEXT, "em dash crept back into the regulatory notice"
+
+        cohort_html, _ = rendered_html
+        standalone_html = completeness_page_html([], {"n_patients": 0, "n_complete": 0,
+                                                       "n_incomplete": 0, "worst_gap": None,
+                                                       "n_unmapped": 0}, DEFAULT_PROTOCOL, [])
+        assert COMP_RUO_TEXT in cohort_html
+        assert COMP_RUO_TEXT in standalone_html
 
     def test_render_topbar_manifest_fields(self, rendered_html):
         """Topbar must surface the manifest summary: root, files, patients, studies, timestamp."""

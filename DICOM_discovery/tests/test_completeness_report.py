@@ -70,7 +70,7 @@ def _patient(pid, cells, n_expected, n_present):
 
 def _kpis(**over):
     base = {"n_patients": 0, "n_complete": 0, "n_incomplete": 0,
-            "pct_complete_mean": 0.0, "worst_gap": None, "n_unmapped": 0}
+            "worst_gap": None, "n_unmapped": 0}
     base.update(over)
     return base
 
@@ -88,7 +88,7 @@ GRID_TWO = [
         _cell("M12", [("MR", "PRESENT")]),
     ], n_expected=4, n_present=4),
 ]
-KPIS_TWO = _kpis(n_patients=2, n_complete=1, n_incomplete=1, pct_complete_mean=75.0,
+KPIS_TWO = _kpis(n_patients=2, n_complete=1, n_incomplete=1,
                  worst_gap={"timepoint": "M3", "modality": "MR", "n_patients": 1})
 #: The gaps GRID_TWO actually contains, in completeness_gaps' order (tie -> protocol order).
 GAPS_TWO = [{"timepoint": "M3", "modality": "MR", "n_patients": 1, "patients": ["L004"]},
@@ -388,6 +388,106 @@ def test_nothing_expected_patients_are_kept_out_of_the_complete_headline():
     assert "2 / 2" not in html_text
     assert "nothing expected" in html_text
     assert "1 patient has nothing expected by this protocol" in html_text
+
+
+def test_grammar_agrees_when_more_than_one_patient_has_nothing_expected():
+    """'2 patients have nothing expected', not 'has' — a plural count needs a plural verb.
+
+    Would fail against the un-fixed renderer, which always said "has" regardless of count.
+    """
+    grid = [
+        _patient("V1", [_cell("M3", [])], n_expected=0, n_present=0),
+        _patient("V2", [_cell("M3", [])], n_expected=0, n_present=0),
+    ]
+    html_text = completeness_section_html(grid, _kpis(n_patients=2, n_complete=2),
+                                          TINY_PROTOCOL, [])
+    assert "2 patients have nothing expected by this protocol" in html_text
+    assert "2 patients has nothing expected" not in html_text
+
+
+# --------------------------------------------------------------------------- #
+# 6c. A fully-UNMAPPED patient is not "nothing expected" (whole-branch review Finding 1)
+# --------------------------------------------------------------------------- #
+
+def _fully_unmapped_patient(pid, timepoints, mods):
+    """A patient whose every cell is UNMAPPED — they have studies, but none of them could be
+    dated onto the protocol timeline. Mirrors what build_completeness/completeness_grid
+    actually produce for such a patient: state UNMAPPED for *every* (timepoint, modality),
+    including modalities the protocol never asked for at that timepoint (the UNMAPPED branch
+    in build_completeness short-circuits the expected/observed logic entirely), and
+    n_expected == 0 because patient_completeness excludes UNMAPPED cells outright.
+    """
+    cells = [_cell(tp, [(m, "UNMAPPED") for m in mods]) for tp in timepoints]
+    return _patient(pid, cells, n_expected=0, n_present=0)
+
+
+def test_fully_unmapped_patient_reads_cannot_be_placed_not_nothing_expected():
+    """A patient the protocol *did* expect things of, but whose dates could not be placed on
+    the timeline, must not render the same badge as a patient asked for nothing.
+
+    Would fail against the un-fixed renderer: both hit the ``n_expected == 0`` branch and
+    printed 'nothing expected' next to a row of '? unmapped' chips that prove the protocol did
+    expect things — a clinician could read that as an ungradeable patient with a clean grid.
+    """
+    grid = [
+        _patient("COMPLETE", [_cell("baseline", [("CT", "PRESENT"), ("MR", "PRESENT")])],
+                 n_expected=2, n_present=2),
+        _fully_unmapped_patient("UNDATED", TINY_PROTOCOL.timepoints, ["CT", "MR"]),
+    ]
+    html_text = completeness_section_html(grid, _kpis(n_patients=2, n_complete=2),
+                                          TINY_PROTOCOL, [])
+    row = re.search(r"<tr class='crow'[^>]*data-pid='UNDATED'.*?</tr>", html_text, re.S)
+    assert row, "fully-UNMAPPED patient row not found"
+    assert "cannot be placed on the timeline" in row.group(0)
+    assert "nothing expected" not in row.group(0)
+
+
+def test_fully_unmapped_patients_are_excluded_from_both_complete_and_vacuous_counts():
+    """A fully-UNMAPPED patient must not be counted as complete, nor as 'nothing expected'.
+
+    The data layer's raw n_complete counts them (n_missing == 0, same as a vacuous patient),
+    and simply excluding them from n_vacuous — without also excluding them from n_complete —
+    would just move the mislabel from 'nothing expected' to 'patients complete', which is
+    worse: an ungradeable patient would then read as a clean pass. Only the genuinely vacuous
+    patient may appear in either segment.
+    """
+    grid = [
+        _patient("COMPLETE", [_cell("baseline", [("CT", "PRESENT")])], n_expected=1, n_present=1),
+        _patient("VACUOUS", [_cell("baseline", [])], n_expected=0, n_present=0),
+        _fully_unmapped_patient("UNDATED", TINY_PROTOCOL.timepoints, ["CT"]),
+    ]
+    # The data layer would say all 3 are complete (n_missing == 0 for every one of them).
+    html_text = completeness_section_html(grid, _kpis(n_patients=3, n_complete=3),
+                                          TINY_PROTOCOL, [])
+    assert "1 / 3" in html_text, "only COMPLETE actually earned 'complete'"
+    assert "3 / 3" not in html_text and "2 / 3" not in html_text
+    vacuous_seg = re.search(
+        r"<span class='kpi-num'>([^<]+)</span><span class='kpi-lab[^>]*'>nothing expected</span>",
+        html_text)
+    assert vacuous_seg and vacuous_seg.group(1) == "1", (
+        "'nothing expected' must count only VACUOUS, not the fully-UNMAPPED patient too"
+    )
+
+
+def test_fully_unmapped_row_collapses_to_one_chip_per_timepoint():
+    """~40 identical '? unmapped' chips (one per modality per timepoint) collapse to one chip
+    per timepoint — the state still carries in the chip's class, text and aria-label.
+
+    Would fail against the un-fixed renderer, which drew one chip per (timepoint, modality)
+    item regardless of how many of them said the identical thing.
+    """
+    grid = [_fully_unmapped_patient("UNDATED", TINY_PROTOCOL.timepoints, ["CT", "MR", "PT"])]
+    html_text = completeness_section_html(grid, _kpis(n_patients=1, n_complete=0),
+                                          TINY_PROTOCOL, [])
+    row = re.search(r"<tr class='crow'[^>]*data-pid='UNDATED'.*?</tr>", html_text, re.S).group(0)
+    chips = _chips(row)
+    assert len(chips) == len(TINY_PROTOCOL.timepoints), (
+        f"expected one collapsed chip per timepoint, got {len(chips)}: {chips}"
+    )
+    for chip in chips:
+        assert "chip-UNMAPPED" in chip
+        assert "unmapped" in chip  # state word, in both the visible label and the sr text
+        assert "data-state='UNMAPPED'" in chip
 
 
 # --------------------------------------------------------------------------- #

@@ -283,16 +283,24 @@ def completeness_gaps(long_df: pd.DataFrame) -> List[dict]:
 def completeness_kpis(long_df: pd.DataFrame) -> dict:
     """Cohort-level numbers for a dashboard header — built from completeness_grid so the
     per-patient math (including the vacuous/UNMAPPED convention) never drifts from the grid.
+
+    Deliberately does *not* compute a mean completeness percentage. This module's grid gives a
+    patient nothing is expected of ``pct_complete = 100.0`` (see ``completeness_grid``), so
+    averaging that field over every patient counts them as fully complete and inflates the
+    result. :func:`DICOM_discovery.report_cohort.cohort_pct_complete` is the one definition of
+    "mean per-patient completeness" the cohort report shows, computed over mappable patients
+    only (via ``patient_completeness``, which already excludes both vacuous and UNMAPPED
+    patients) — a second, disagreeing mean here would be dead code at best and a silent
+    contradiction on the page at worst.
     """
     grid = completeness_grid(long_df)
     if not grid:
         return {"n_patients": 0, "n_complete": 0, "n_incomplete": 0,
-                "pct_complete_mean": 0.0, "worst_gap": None, "n_unmapped": 0}
+                "worst_gap": None, "n_unmapped": 0}
 
     n_patients = len(grid)
     n_complete = sum(1 for p in grid if p["n_missing"] == 0)
     n_unmapped = sum(1 for p in grid for c in p["cells"] if c["state"] == "UNMAPPED")
-    pct_complete_mean = round(sum(p["pct_complete"] for p in grid) / n_patients, 1)
 
     # The worst gap is the first row of the gap table, by definition — so take it from there
     # rather than counting a second time. The counting loop this replaces incremented once per
@@ -306,7 +314,7 @@ def completeness_kpis(long_df: pd.DataFrame) -> dict:
         worst_gap = {key: gaps[0][key] for key in ("timepoint", "modality", "n_patients")}
 
     return {"n_patients": n_patients, "n_complete": n_complete,
-            "n_incomplete": n_patients - n_complete, "pct_complete_mean": pct_complete_mean,
+            "n_incomplete": n_patients - n_complete,
             "worst_gap": worst_gap, "n_unmapped": n_unmapped}
 
 

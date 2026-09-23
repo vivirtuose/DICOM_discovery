@@ -267,7 +267,22 @@ def test_completeness_kpis_empty_long_df_returns_zeros_without_raising():
     empty = pd.DataFrame(columns=["patient", "timepoint", "modality", "expected", "observed", "state"])
     kpis = completeness_kpis(empty)
     assert kpis == {"n_patients": 0, "n_complete": 0, "n_incomplete": 0,
-                    "pct_complete_mean": 0.0, "worst_gap": None, "n_unmapped": 0}
+                    "worst_gap": None, "n_unmapped": 0}
+
+
+def test_completeness_kpis_has_no_second_pct_complete_definition(longitudinal):
+    """completeness_kpis must not expose a mean-completeness number of its own.
+
+    The one definition of "mean per-patient completeness" the report shows is
+    ``report_cohort.cohort_pct_complete`` (over mappable patients, via patient_completeness).
+    A ``pct_complete_mean`` here used to count patients nothing is expected of as 100% complete
+    and disagree with that number while never being rendered anywhere. Would fail again if the
+    key were reintroduced.
+    """
+    _root, idx = longitudinal
+    _state, _hover, long_df = build_completeness(idx.table, DEFAULT_PROTOCOL)
+    kpis = completeness_kpis(long_df)
+    assert "pct_complete_mean" not in kpis
 
 
 def test_render_map_is_self_contained(longitudinal, tmp_path):

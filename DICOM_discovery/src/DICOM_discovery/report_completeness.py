@@ -69,6 +69,34 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
+def _verb(n: int, singular: str, plural: str) -> str:
+    """'1 patient has' / '3 patients have' — pairs with :func:`_plural` on the same count."""
+    return singular if n == 1 else plural
+
+
+def _is_fully_unmapped(patient: dict) -> bool:
+    """True when this patient hit the ``n_expected == 0`` branch *because* every one of their
+    cells is UNMAPPED, rather than because the protocol asked nothing of them.
+
+    Such a patient has data, but none of it could be placed on the protocol timeline (e.g.
+    every StudyDate was unparseable) — ``build_completeness`` marks every one of their cells
+    UNMAPPED regardless of what the protocol expects there, and ``patient_completeness``
+    excludes them entirely (see completeness.py), so they surface with ``n_expected=0`` just
+    like a patient the protocol genuinely asks nothing of. The two are not the same claim: one
+    is "nothing to grade", the other is "could not be graded". Conflating them let an
+    ungradeable patient read as a clean, expected-nothing case.
+
+    The ``n_expected == 0`` guard matters: a patient can have a single UNMAPPED cell alongside
+    cells that *do* carry a real verdict (e.g. one MISSING timepoint plus one UNMAPPED one) —
+    that patient has a real, nonzero ``n_expected`` and must keep the ordinary "N / M missing"
+    badge, not the fully-unmapped one.
+    """
+    if int(patient.get("n_expected", 0) or 0) != 0:
+        return False
+    cells = patient.get("cells") or []
+    return bool(cells) and all(str(c.get("state")) == "UNMAPPED" for c in cells)
+
+
 # --------------------------------------------------------------------------- #
 # KPI line
 # --------------------------------------------------------------------------- #
@@ -84,12 +112,18 @@ def _kpi_line_html(grid: List[dict], kpis: dict) -> str:
 
     ``n_complete`` from the data layer counts a patient with *nothing expected* as complete
     (``n_expected=0`` gives ``pct_complete=100``, numerically identical to a genuinely
-    complete patient). Reporting that number verbatim would overstate the cohort, so the
-    vacuous patients are subtracted here and surfaced as their own segment instead.
+    complete patient) — and it counts a fully-UNMAPPED patient (data exists, but none of it
+    could be placed on the timeline) the same way, for the same numeric reason. Reporting that
+    number verbatim would overstate the cohort, so both kinds of patient are subtracted here:
+    the vacuous ones are surfaced as their own segment, the unplaceable ones are not "nothing
+    expected" of them either (their row says so — see ``_row_html``) and must not be silently
+    read as complete or as vacuous.
     """
     n_patients = int(kpis.get("n_patients", 0) or 0)
-    n_vacuous = sum(1 for p in grid if int(p.get("n_expected", 0) or 0) == 0)
-    n_complete = max(0, int(kpis.get("n_complete", 0) or 0) - n_vacuous)
+    n_unplaceable = sum(1 for p in grid if _is_fully_unmapped(p))
+    n_vacuous = sum(1 for p in grid
+                    if int(p.get("n_expected", 0) or 0) == 0 and not _is_fully_unmapped(p))
+    n_complete = max(0, int(kpis.get("n_complete", 0) or 0) - n_vacuous - n_unplaceable)
 
     cells = [_kpi_seg(
         f"{n_complete} / {n_patients}", "patients complete",
@@ -99,9 +133,9 @@ def _kpi_line_html(grid: List[dict], kpis: dict) -> str:
     if n_vacuous:
         cells.append(_kpi_seg(
             n_vacuous, "nothing expected",
-            f"{_plural(n_vacuous, 'patient')} has nothing expected by this protocol "
-            "(no protocol window matched their studies). Not counted as complete: there was "
-            "nothing to be complete about.",
+            f"{_plural(n_vacuous, 'patient')} {_verb(n_vacuous, 'has', 'have')} nothing "
+            "expected by this protocol (no protocol window matched their studies). Not "
+            "counted as complete: there was nothing to be complete about.",
             cls="dim",
         ))
 
@@ -181,15 +215,37 @@ def _chip_html(timepoint: str, modality: str, state: str) -> str:
             f"<span class='sr'>{word}</span></span>")
 
 
+def _tp_chip_html(timepoint: str, state: str) -> str:
+    """One chip per *timepoint*, used only when every modality at that timepoint shares one
+    state (currently: a fully-UNMAPPED patient). ~40 identical per-modality chips saying
+    "unmapped" tell a reader nothing that one does not; the state still carries in class,
+    text and aria-label, same as :func:`_chip_html`."""
+    word = _STATE_WORD.get(state, state.lower())
+    glyph = _STATE_GLYPH.get(state, "-")
+    label = f"{timepoint} {word}"
+    return (f"<span class='chip chip-{_esc(state)}' data-tp='{_esc(timepoint)}' "
+            f"data-state='{_esc(state)}' aria-label='{_esc(label)}' "
+            f"title='{_esc(timepoint)} - {word}'>"
+            f"<span class='cmark' aria-hidden='true'>{glyph}</span>"
+            f"<span class='clab'>{_esc(word)}</span>"
+            f"<span class='sr'>{word}</span></span>")
+
+
 def _row_html(patient: dict, timepoints: List[str]) -> str:
     pid = str(patient.get("patient", ""))
     n_expected = int(patient.get("n_expected", 0) or 0)
     n_missing = int(patient.get("n_missing", 0) or 0)
+    fully_unmapped = _is_fully_unmapped(patient)
 
     # The binding ruling from the data layer: a patient the protocol asks nothing of comes out
     # numerically identical to a fully complete one (0 missing, 100 %). Saying "0 / 0 missing"
-    # would read as a clean bill of health, so the row states the truth instead.
-    if n_expected == 0:
+    # would read as a clean bill of health, so the row states the truth instead. A
+    # fully-UNMAPPED patient hits the same n_expected == 0 branch for a different reason — the
+    # protocol *did* expect things, none of their studies could be dated onto the timeline —
+    # so it gets its own, distinct wording rather than reading as "nothing expected".
+    if fully_unmapped:
+        status = "<span class='cstat unmapped'>cannot be placed on the timeline</span>"
+    elif n_expected == 0:
         status = "<span class='cstat none'>nothing expected</span>"
     else:
         cls = "cstat" if n_missing == 0 else "cstat bad"
@@ -198,17 +254,24 @@ def _row_html(patient: dict, timepoints: List[str]) -> str:
     by_tp = {str(c.get("timepoint")): c for c in patient.get("cells", [])}
     tds = []
     for tp in timepoints:
-        items = (by_tp.get(tp) or {}).get("items") or []
+        cell = by_tp.get(tp) or {}
+        items = cell.get("items") or []
         if not items:
             # Absence of ink: the old grey "N/A" box is exactly what this replaces.
             tds.append("<td class='ccell empty'></td>")
+            continue
+        if fully_unmapped:
+            # Every item in this cell shares one state (UNMAPPED) by construction, so one chip
+            # says the same thing ~len(items) chips did.
+            state = str(cell.get("state") or "UNMAPPED")
+            tds.append(f"<td class='ccell' data-tp='{_esc(tp)}'>{_tp_chip_html(tp, state)}</td>")
             continue
         chips = "".join(_chip_html(tp, str(it["modality"]), str(it["state"])) for it in items)
         tds.append(f"<td class='ccell' data-tp='{_esc(tp)}'>{chips}</td>")
 
     return (f"<tr class='crow' data-pid='{_esc(pid)}' data-missing='{n_missing}' "
             f"data-expected='{n_expected}' data-filter='{_esc(pid.lower())}'>"
-            f"<th class='c-pid' scope='row'><span class='mono pid'>{_esc(pid)}</span>"
+            f"<th class='cc-pid' scope='row'><span class='mono pid'>{_esc(pid)}</span>"
             f"{status}</th>{''.join(tds)}</tr>")
 
 
@@ -216,7 +279,7 @@ def _grid_html(grid: List[dict], protocol: Protocol) -> str:
     heads = "".join(f"<th class='ctp' scope='col'>{_esc(tp)}</th>" for tp in protocol.timepoints)
     rows = "".join(_row_html(p, list(protocol.timepoints)) for p in grid)
     return (f"<div class='cgrid-scroll'><table class='grid cgrid' id='comp-grid'>"
-            f"<thead><tr><th class='c-pid' scope='col'>Patient</th>{heads}</tr></thead>"
+            f"<thead><tr><th class='cc-pid' scope='col'>Patient</th>{heads}</tr></thead>"
             f"<tbody>{rows}</tbody></table></div>")
 
 
@@ -380,15 +443,15 @@ def completeness_styles() -> str:
    now, and the table hands its overflow back. */
 .cgrid{border:none;border-radius:0;overflow:visible}
 .cgrid thead th{position:sticky;top:0;z-index:3}
-.cgrid thead th.c-pid{left:0;z-index:4}
+.cgrid thead th.cc-pid{left:0;z-index:4}
 .cgrid th.ctp{font-family:var(--mono);font-size:12px;color:var(--ink);font-weight:600}
 .cgrid td,.cgrid tbody th{padding:5px 10px;vertical-align:middle}
-.cgrid tbody th.c-pid{
+.cgrid tbody th.cc-pid{
   position:sticky;left:0;z-index:2;background:var(--surface);
   text-align:left;font-weight:400;border-bottom:1px solid var(--line);
   border-right:1px solid var(--line);white-space:nowrap;
 }
-.cgrid tbody tr:hover th.c-pid{background:var(--surface-2)}
+.cgrid tbody tr:hover th.cc-pid{background:var(--surface-2)}
 .cgrid .pid{font-weight:600;color:var(--ink);margin-right:9px}
 .cstat{font-size:11px;color:var(--dim);font-family:var(--mono)}
 .cstat.bad{color:var(--incomplete);font-weight:600}
@@ -396,6 +459,13 @@ def completeness_styles() -> str:
 .cstat.none{
   font-family:var(--sans);font-style:italic;color:var(--muted);
   border:1px dashed var(--line-strong);border-radius:var(--radius-sm);padding:0 6px;
+}
+/* "cannot be placed on the timeline" is a data-quality flag, not a clean bill of health —
+   same ochre as the UNMAPPED chip/verdict (WARN), so the row and its chips agree. */
+.cstat.unmapped{
+  font-family:var(--sans);font-style:italic;color:var(--warn);
+  border:1px dashed color-mix(in srgb,var(--warn) 45%,transparent);
+  border-radius:var(--radius-sm);padding:0 6px;
 }
 .ccell{white-space:nowrap}
 .ccell.empty{background:none}
@@ -426,7 +496,7 @@ def completeness_styles() -> str:
 
 @media (max-width:760px){
   .cgrid-scroll{max-height:none}
-  .cgrid tbody th.c-pid,.cgrid thead th.c-pid{position:static}
+  .cgrid tbody th.cc-pid,.cgrid thead th.cc-pid{position:static}
 }
 """
 

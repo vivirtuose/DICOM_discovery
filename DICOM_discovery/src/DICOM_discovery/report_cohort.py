@@ -40,6 +40,7 @@ from .completeness import (
 )
 from .fsutil import atomic_write_text
 from .report_completeness import (
+    RUO_TEXT,
     completeness_script,
     completeness_section_html,
     completeness_styles,
@@ -55,7 +56,11 @@ except Exception:  # pragma: no cover
 
 LOG = logging.getLogger("DICOM_discovery.report_cohort")
 
-RUO_TEXT = "Research Use Only — not a medical device."
+# RUO_TEXT itself lives in report_completeness (this direction of import is cycle-free: that
+# module only imports Protocol from .completeness, never anything from this one at module
+# level). Two spellings of one regulatory notice — an em dash here, an ASCII hyphen there —
+# shipped in the cohort report and the standalone page at once; importing keeps them from
+# drifting apart again.
 
 # Verdict colours (semantics fixed by the design spec). Muted, document-grade tones —
 # saturated enough to carry meaning, never bright enough to read as a dashboard. NO_RT is a
@@ -367,7 +372,7 @@ def _kpi_html(kpis: dict) -> str:
         chip(v["INCOMPLETE"], "INCOMPLETE", "INCOMPLETE", "incomplete"),
         chip(v["NO_RT"], "NO_RT", "NO_RT", "nort"),
         chip(to_review, "to review", "REVIEW", "act"),
-        static(pct_str, "cohort complete"),
+        static(pct_str, "mean per-patient completeness"),
     ]
     return f'<section class="kpis">{"".join(cells)}</section>'
 
