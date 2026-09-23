@@ -5,7 +5,7 @@
 **Health:** 212 tests pass, `ruff` clean. CI green on Python 3.9–3.14 (Ubuntu) plus Windows
 and macOS legs; NAS bundle, standalone binaries and the release pipeline all green.
 
-> Handoff document. Objectives 1–4 are complete and shipped. Overwrite this file when the
+> Handoff document. Objectives 1–5 are complete and shipped. Overwrite this file when the
 > next objective starts.
 
 ---
