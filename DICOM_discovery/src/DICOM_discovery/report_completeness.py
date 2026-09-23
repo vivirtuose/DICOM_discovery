@@ -220,6 +220,45 @@ def _grid_html(grid: List[dict], protocol: Protocol) -> str:
             f"<tbody>{rows}</tbody></table></div>")
 
 
+#: Names shown inline in a gap row before the list is cut short. Eight ids fit a table cell
+#: at a readable size; the full list is always in the CSV export, so nothing is lost.
+_WHO_LIMIT = 8
+
+
+def _gap_table_html(gaps: List[dict]) -> str:
+    """The headline: one row per (timepoint, modality) that at least one patient is missing.
+
+    This is the shape of the action. A QC round does not re-export a patient, it re-exports a
+    timepoint and a modality for whoever is missing it, so that pair - and how many patients
+    ride on it - is what belongs above the fold. The per-patient grid answers the follow-up
+    question, which is why it now sits behind a drill-down.
+    """
+    if not gaps:
+        return ("<p class='nogap'>No gap: every expected object is present.</p>")
+
+    rows = []
+    for gap in gaps:
+        patients = list(gap.get("patients") or [])
+        shown = patients[:_WHO_LIMIT]
+        who = ", ".join(_esc(p) for p in shown)
+        title = ""
+        if len(patients) > _WHO_LIMIT:
+            who += (f" <span class='gmore'>+{len(patients) - _WHO_LIMIT} more</span>")
+            # The names that did not fit are still one hover away, and all of them are in the
+            # CSV export - a truncated cell must never be the only place a patient existed.
+            title = f" title='{_esc(', '.join(patients))}'"
+        rows.append(
+            f"<tr class='grow'><td class='gtp'>{_esc(gap['timepoint'])}</td>"
+            f"<td class='gmod'>{_esc(gap['modality'])}</td>"
+            f"<td class='gnum mono'>{int(gap['n_patients'])}</td>"
+            f"<td class='gwho'{title}>{who}</td></tr>"
+        )
+    return (f"<table class='grid gaptable' id='comp-gaps'>"
+            f"<thead><tr><th>Timepoint</th><th>Modality</th>"
+            f"<th class='gnum'>Patients missing</th><th>Who</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table>")
+
+
 def _toolbar_html() -> str:
     return ("<div class='toolbar'>"
             "<input type='search' id='comp-filter' class='filter' placeholder='Filter patients&hellip;' "
@@ -230,20 +269,34 @@ def _toolbar_html() -> str:
             "<span class='hint'>Worst patients first; blank = nothing expected.</span></div>")
 
 
-def completeness_section_html(grid: List[dict], kpis: dict, protocol: Protocol) -> str:
-    """Render the whole completeness section: KPI line, protocol line, legend and grid.
+def completeness_section_html(grid: List[dict], kpis: dict, protocol: Protocol,
+                              gaps: List[dict]) -> str:
+    """Render the whole completeness section, aggregate first and per-patient second.
 
-    Pure HTML — no chart library, no external resource, no per-row ``<style>``. The caller
+    Order is the argument this function makes: KPI line, protocol line, the cohort gap table,
+    and only then the per-patient grid, collapsed inside a native ``<details>``. What
+    triggers an action is "chase the M6 MR for 3 patients" - one line. A 98 x 4 wall of chips
+    to carry that sentence is out of proportion, so it becomes the drill-down.
+
+    ``<details>`` is deliberately native: no new JS, and keyboard and screen-reader behaviour
+    come for free.
+
+    Pure HTML - no chart library, no external resource, no per-row ``<style>``. The caller
     supplies the page's stylesheet (:func:`completeness_styles`) and script
     (:func:`completeness_script`) exactly once.
     """
     head = _kpi_line_html(grid, kpis) + _protocol_line_html(protocol)
     if not grid:
+        # Not "no gap" - nothing was gradeable at all, which is a different statement.
         return (f"<section class='comp'>{head}"
                 "<p class='note'>No completeness data - no patient could be graded against "
                 "this protocol. Check that the index found dated studies.</p></section>")
-    return (f"<section class='comp'>{head}{_toolbar_html()}{_legend_html()}"
-            f"{_grid_html(grid, protocol)}</section>")
+    drill = (f"<details class='comp-detail'>"
+             f"<summary class='comp-summary'>Per-patient detail "
+             f"({_plural(len(grid), 'patient')})</summary>"
+             f"{_toolbar_html()}{_legend_html()}{_grid_html(grid, protocol)}"
+             f"</details>")
+    return f"<section class='comp'>{head}{_gap_table_html(gaps)}{drill}</section>"
 
 
 # --------------------------------------------------------------------------- #
@@ -280,6 +333,34 @@ def completeness_styles() -> str:
 .protocol-line .ptp b{color:var(--ink);font-weight:600}
 .protocol-line .pwin{font-family:var(--mono);font-size:11px;color:var(--dim)}
 .protocol-line .pmods{font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+/* ---- the gap table: the headline, so it gets the weight the grid used to have ---- */
+.gaptable{margin-bottom:20px}
+.gaptable td{padding:9px 14px}
+.gaptable .gtp{font-family:var(--mono);font-weight:600;color:var(--ink);white-space:nowrap}
+.gaptable .gmod{font-family:var(--mono);color:var(--ink);white-space:nowrap}
+.gaptable th.gnum,.gaptable td.gnum{text-align:right;white-space:nowrap}
+.gaptable td.gnum{font-weight:700;color:var(--incomplete)}
+.gaptable .gwho{font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.6}
+.gmore{font-family:var(--sans);font-style:italic;color:var(--dim)}
+/* A clean cohort is a result, not an empty table — it reads as a sentence. */
+.nogap{
+  color:var(--ok);font-size:13px;margin:0 0 20px;padding:11px 14px;
+  background:#f0f6f1;border:1px solid #cce0d2;border-radius:var(--radius);
+}
+
+/* ---- the per-patient drill-down (native <details>, no JS) ---- */
+.comp-detail{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:0 16px;
+}
+.comp-summary{
+  cursor:pointer;padding:11px 2px;font-size:12.5px;font-weight:600;color:var(--accent);
+  list-style-position:outside;
+}
+.comp-summary:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent-soft)}
+.comp-detail[open] .comp-summary{border-bottom:1px solid var(--line);margin-bottom:14px}
+.comp-detail>*:last-child{margin-bottom:16px}
 
 /* ---- legend ----
    No `.clegend .sw` rule here: a descendant selector (0,2,0) would out-specify every
@@ -452,7 +533,7 @@ def completeness_script() -> str:
 # Standalone page (the `dicom-discovery completeness` command)
 # --------------------------------------------------------------------------- #
 def completeness_page_html(grid: List[dict], kpis: dict, protocol: Protocol,
-                           title: Optional[str] = None,
+                           gaps: List[dict], title: Optional[str] = None,
                            manifest: Optional[Dict[str, object]] = None) -> str:
     """A complete, self-contained HTML page wrapping :func:`completeness_section_html`.
 
@@ -487,7 +568,7 @@ def completeness_page_html(grid: List[dict], kpis: dict, protocol: Protocol,
   {meta}
 </header>
 <main>
-{completeness_section_html(grid, kpis, protocol)}
+{completeness_section_html(grid, kpis, protocol, gaps)}
 </main>
 <footer>
   <b>{_esc(RUO_TEXT)}</b><br>

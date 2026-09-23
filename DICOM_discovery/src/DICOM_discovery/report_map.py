@@ -23,7 +23,7 @@ from typing import Optional
 
 import pandas as pd
 
-from .completeness import Protocol, completeness_grid, completeness_kpis
+from .completeness import Protocol, completeness_gaps, completeness_grid, completeness_kpis
 from .fsutil import atomic_write_text
 from .report_completeness import completeness_page_html
 
@@ -44,7 +44,8 @@ def render_completeness_map(state_df: pd.DataFrame, hover_df: pd.DataFrame,
 
     grid = completeness_grid(long_df)
     kpis = completeness_kpis(long_df)
-    page = completeness_page_html(grid, kpis, protocol, title=title)
+    gaps = completeness_gaps(long_df)
+    page = completeness_page_html(grid, kpis, protocol, gaps, title=title)
 
     atomic_write_text(out, page)
     LOG.info("Completeness page -> %s (%d patients, %d incomplete)",

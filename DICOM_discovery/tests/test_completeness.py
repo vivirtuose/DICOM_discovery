@@ -15,6 +15,7 @@ from DICOM_discovery import (  # noqa: E402
     CellState,
     Protocol,
     build_completeness,
+    completeness_gaps,
     completeness_grid,
     completeness_kpis,
     load_protocol,
@@ -287,3 +288,129 @@ def test_render_map_is_self_contained(longitudinal, tmp_path):
     assert "<script src=" not in page and "<link href=" not in page
     assert "https://" not in page
     assert "MISSING" in page and "PRESENT" in page and "UNMAPPED" in page
+
+
+# --------------------------------------------------------------------------- #
+# completeness_gaps — the cohort-level headline (Task 2b)
+# --------------------------------------------------------------------------- #
+
+def test_completeness_gaps_orders_by_patient_count_descending():
+    """The gap that affects most patients must lead: it is the one batch re-export to run.
+
+    Would fail if the list kept insertion order, or sorted by timepoint, burying the gap
+    that a single action would close for the most patients.
+    """
+    long_df = _long([
+        ["A", "baseline", "CT", True, True, "PRESENT"],
+        ["A", "M3", "MR", True, False, "MISSING"],
+        ["A", "M6", "MR", True, False, "MISSING"],
+        ["B", "baseline", "CT", True, True, "PRESENT"],
+        ["B", "M6", "MR", True, False, "MISSING"],
+        ["C", "baseline", "CT", True, True, "PRESENT"],
+        ["C", "M6", "MR", True, False, "MISSING"],
+    ])
+    gaps = completeness_gaps(long_df)
+    assert [(g["timepoint"], g["modality"], g["n_patients"]) for g in gaps] == [
+        ("M6", "MR", 3), ("M3", "MR", 1)]
+
+
+def test_completeness_gaps_tie_breaks_by_protocol_order_then_modality():
+    """Ties resolve by protocol order of the timepoint, then modality name — deterministic.
+
+    Same convention as completeness_kpis' worst_gap. Would fail if ties fell back to
+    dictionary order (M12 would precede M3) or to first-seen order.
+    """
+    long_df = _long([
+        ["A", "baseline", "CT", True, False, "MISSING"],
+        ["A", "baseline", "MR", True, False, "MISSING"],
+        ["A", "M3", "MR", True, False, "MISSING"],
+        ["A", "M12", "MR", True, False, "MISSING"],
+    ])
+    gaps = completeness_gaps(long_df)
+    # All four gaps affect exactly one patient, so only the tie-break orders them.
+    assert all(g["n_patients"] == 1 for g in gaps)
+    assert [(g["timepoint"], g["modality"]) for g in gaps] == [
+        ("baseline", "CT"), ("baseline", "MR"), ("M3", "MR"), ("M12", "MR")]
+
+
+def test_completeness_gaps_lists_every_affected_patient_sorted():
+    """The patient list must be complete and sorted — no truncation at the data layer.
+
+    Truncation is a rendering decision; a data layer that dropped names would make the CSV
+    export (rebuilt from the same source) silently incomplete.
+    """
+    rows = [[f"P{i:02d}", "M6", "MR", True, False, "MISSING"] for i in range(12, -1, -1)]
+    gaps = completeness_gaps(_long(rows))
+    assert len(gaps) == 1
+    assert gaps[0]["n_patients"] == 13
+    assert gaps[0]["patients"] == sorted(gaps[0]["patients"])
+    assert len(gaps[0]["patients"]) == 13
+
+
+def test_completeness_gaps_counts_patients_not_cells():
+    """One patient missing the same pair twice must still count once.
+
+    Cannot happen through build_completeness today, but the field is named n_patients and
+    must mean that; would fail if the implementation counted MISSING rows.
+    """
+    long_df = _long([
+        ["A", "M6", "MR", True, False, "MISSING"],
+        ["A", "M6", "MR", True, False, "MISSING"],
+    ])
+    gaps = completeness_gaps(long_df)
+    assert gaps[0]["n_patients"] == 1
+    assert gaps[0]["patients"] == ["A"]
+
+
+def test_completeness_gaps_ignores_states_that_are_not_missing():
+    """Only MISSING is a gap. UNMAPPED especially must never be reported as one.
+
+    Would fail if the filter widened to "not present", which would tell a clinician to chase
+    scans that exist but fell outside a protocol window.
+    """
+    long_df = _long([
+        ["A", "baseline", "CT", True, True, "PRESENT"],
+        ["A", "baseline", "PT", False, True, "EXTRA"],
+        ["A", "M3", "MR", True, False, "UNMAPPED"],
+        ["A", "M6", "MR", False, False, "NA"],
+    ])
+    assert completeness_gaps(long_df) == []
+
+
+def test_completeness_gaps_empty_long_df_returns_empty_list_without_raising():
+    empty = pd.DataFrame(columns=["patient", "timepoint", "modality",
+                                  "expected", "observed", "state"])
+    assert completeness_gaps(empty) == []
+    assert completeness_gaps(None) == []
+
+
+def test_completeness_gaps_first_entry_agrees_with_kpis_worst_gap(longitudinal):
+    """gaps[0] and kpis['worst_gap'] must name the same pair and the same count.
+
+    They are two views of one fact; if they could drift, the KPI line and the gap table on
+    the same page would contradict each other. Would fail if either sort key or tie-break
+    were changed on one side only.
+    """
+    _root, idx = longitudinal
+    _state, _hover, long_df = build_completeness(idx.table, DEFAULT_PROTOCOL)
+    gaps, kpis = completeness_gaps(long_df), completeness_kpis(long_df)
+    assert gaps, "the longitudinal fixture is expected to have at least one gap"
+    assert kpis["worst_gap"] == {"timepoint": gaps[0]["timepoint"],
+                                 "modality": gaps[0]["modality"],
+                                 "n_patients": gaps[0]["n_patients"]}
+
+
+def test_completeness_gaps_agree_with_the_grid_on_the_real_cohort(longitudinal):
+    """Every MISSING item in the grid must appear in exactly one gap entry, and vice versa.
+
+    The gap table is an aggregation of the same data the grid shows; this pins the two
+    together so a reader cannot find a patient in one and not the other.
+    """
+    _root, idx = longitudinal
+    _state, _hover, long_df = build_completeness(idx.table, DEFAULT_PROTOCOL)
+    from_grid = {(c["timepoint"], it["modality"], p["patient"])
+                 for p in completeness_grid(long_df) for c in p["cells"]
+                 for it in c["items"] if it["state"] == "MISSING"}
+    from_gaps = {(g["timepoint"], g["modality"], pid)
+                 for g in completeness_gaps(long_df) for pid in g["patients"]}
+    assert from_grid == from_gaps

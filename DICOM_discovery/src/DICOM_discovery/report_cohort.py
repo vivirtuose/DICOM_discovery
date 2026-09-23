@@ -31,7 +31,13 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from .completeness import Protocol, completeness_grid, completeness_kpis, patient_completeness
+from .completeness import (
+    Protocol,
+    completeness_gaps,
+    completeness_grid,
+    completeness_kpis,
+    patient_completeness,
+)
 from .fsutil import atomic_write_text
 from .report_completeness import (
     completeness_script,
@@ -989,7 +995,8 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
     # same function — one implementation, so the tab and the file can never disagree.
     comp_grid = completeness_grid(comp_long)
     comp_kpis = completeness_kpis(comp_long)
-    comp_section = completeness_section_html(comp_grid, comp_kpis, protocol)
+    comp_gaps = completeness_gaps(comp_long)
+    comp_section = completeness_section_html(comp_grid, comp_kpis, protocol, comp_gaps)
 
     page = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">

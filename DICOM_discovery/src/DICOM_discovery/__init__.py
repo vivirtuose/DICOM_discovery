@@ -11,6 +11,7 @@ from .completeness import (  # noqa: F401
     Protocol,
     assign_timepoints,
     build_completeness,
+    completeness_gaps,
     completeness_grid,
     completeness_kpis,
     load_protocol,

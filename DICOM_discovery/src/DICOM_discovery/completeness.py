@@ -242,6 +242,44 @@ def completeness_grid(long_df: pd.DataFrame) -> List[dict]:
     return grid
 
 
+def completeness_gaps(long_df: pd.DataFrame) -> List[dict]:
+    """Aggregate the cohort's MISSING cells into one entry per (timepoint, modality) pair.
+
+    This is the shape an action takes. A per-patient grid answers "what is wrong with L004?";
+    a QC round answers "which single re-export closes the most holes?", and that question is
+    about the *pair*, not the patient. Ordered worst-first so the answer is the first row.
+
+    Built on :func:`completeness_grid` rather than on ``long_df`` directly, for the same
+    reason ``completeness_kpis`` is: three views of one cohort that derive from one another
+    cannot contradict each other on the page.
+    """
+    grid = completeness_grid(long_df)
+    if not grid:
+        return []
+
+    # Protocol order for the tie-break comes from any one patient's cells — build_completeness
+    # gives every patient the same timepoint sequence (same reasoning as completeness_kpis).
+    tp_order = {tp: i for i, tp in enumerate(c["timepoint"] for c in grid[0]["cells"])}
+
+    # A set per pair: the field is named n_patients, so one patient missing the same pair
+    # twice must still count once.
+    by_pair: Dict[Tuple[str, str], set] = {}
+    for patient in grid:
+        for cell in patient["cells"]:
+            for item in cell["items"]:
+                if item["state"] == "MISSING":
+                    key = (cell["timepoint"], item["modality"])
+                    by_pair.setdefault(key, set()).add(patient["patient"])
+
+    gaps = [{"timepoint": tp, "modality": mod,
+             "n_patients": len(patients), "patients": sorted(patients)}
+            for (tp, mod), patients in by_pair.items()]
+    gaps.sort(key=lambda g: (-g["n_patients"],
+                             tp_order.get(g["timepoint"], len(tp_order)),
+                             g["modality"]))
+    return gaps
+
+
 def completeness_kpis(long_df: pd.DataFrame) -> dict:
     """Cohort-level numbers for a dashboard header — built from completeness_grid so the
     per-patient math (including the vacuous/UNMAPPED convention) never drifts from the grid.
