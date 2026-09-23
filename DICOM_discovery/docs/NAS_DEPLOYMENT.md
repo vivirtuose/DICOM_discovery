@@ -33,22 +33,22 @@ workflow **NAS bundle** → dernier run réussi sur `master` → section **Artif
 
 | Artefact | Contenu | Pour |
 |---|---|---|
-| `dicom-discovery-0.11.0-image-amd64` | `dicom-discovery-0.11.0-amd64.tar.gz` (+ `.sha256`) | mode A, NAS Intel/AMD |
-| `dicom-discovery-0.11.0-image-arm64` | `dicom-discovery-0.11.0-arm64.tar.gz` (+ `.sha256`) | mode A, NAS ARM |
-| `dicom-discovery-0.11.0-wheelhouse-py3.X-linux-x86_64` | wheels + `install-offline.sh` | mode B (choisir la version de Python du serveur) |
+| `dicom-discovery-0.12.0-image-amd64` | `dicom-discovery-0.12.0-amd64.tar.gz` (+ `.sha256`) | mode A, NAS Intel/AMD |
+| `dicom-discovery-0.12.0-image-arm64` | `dicom-discovery-0.12.0-arm64.tar.gz` (+ `.sha256`) | mode A, NAS ARM |
+| `dicom-discovery-0.12.0-wheelhouse-py3.X-linux-x86_64` | wheels + `install-offline.sh` | mode B (choisir la version de Python du serveur) |
 
-Vérifier l'intégrité après transfert : `sha256sum -c dicom-discovery-0.11.0-amd64.tar.gz.sha256`.
+Vérifier l'intégrité après transfert : `sha256sum -c dicom-discovery-0.12.0-amd64.tar.gz.sha256`.
 
 Chaque image est testée en CI dans les conditions du NAS (sans réseau, partage monté en
 lecture seule, système de fichiers en lecture seule, utilisateur non-root) avant d'être
 publiée comme artefact. Pour la construire soi-même :
-`docker build -t dicom-discovery:0.11.0 DICOM_discovery && docker save dicom-discovery:0.11.0 | gzip > dd.tar.gz`.
+`docker build -t dicom-discovery:0.12.0 DICOM_discovery && docker save dicom-discovery:0.12.0 | gzip > dd.tar.gz`.
 
 ## 3. Mode A — conteneur sur le NAS (exemple Synology)
 
 1. **Charger l'image** — Container Manager → *Image* → *Importer* → *Ajouter depuis un
    fichier*. Si l'import graphique refuse le `.tar.gz`, le décompresser (`gunzip`) pour
-   obtenir un `.tar`, ou en SSH : `sudo docker load -i dicom-discovery-0.11.0-amd64.tar.gz`.
+   obtenir un `.tar`, ou en SSH : `sudo docker load -i dicom-discovery-0.12.0-amd64.tar.gz`.
 2. **Préparer le dossier du projet**, p. ex. `/volume1/docker/dicom-discovery/`, et y copier
    [`deploy/nas/docker-compose.yml`](../deploy/nas/docker-compose.yml) et
    [`deploy/nas/.env.example`](../deploy/nas/.env.example) renommé **`.env`**.
@@ -97,7 +97,7 @@ servir les fichiers pendant le scan.
    ```
 2. **Installer hors-ligne** (même version mineure de Python que le bundle, ≥ 3.9) :
    ```bash
-   mkdir /tmp/dd && tar -xzf dicom-discovery-0.11.0-wheelhouse-py3.11-linux-x86_64.tar.gz -C /tmp/dd
+   mkdir /tmp/dd && tar -xzf dicom-discovery-0.12.0-wheelhouse-py3.11-linux-x86_64.tar.gz -C /tmp/dd
    sudo PYTHON=python3.11 sh /tmp/dd/install-offline.sh /opt/dicom-discovery
    ```
 3. **Vérifier à blanc** :

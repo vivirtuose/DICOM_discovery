@@ -282,9 +282,10 @@ folders so that real clinical data and generated reports are never committed.
 src/DICOM_discovery/
     indexer.py           # walk any tree -> canonical DICOM table (content-detected, traced keys)
     rt_integrity.py      # RT chain integrity (per study) + per-patient rollup
-    completeness.py      # observed-vs-expected model (Protocol, timepoint from StudyDate)
-    report_map.py        # self-contained completeness heatmap (Plotly embedded, no CDN)
-    report_cohort.py     # unified RT-integrity + completeness cohort report (self-contained HTML)
+    completeness.py       # observed-vs-expected model (Protocol, timepoint from StudyDate)
+    report_completeness.py # shared renderer: cohort gap table + per-patient grid drill-down
+    report_map.py         # self-contained completeness page (report_completeness, no chart library)
+    report_cohort.py      # unified RT-integrity + completeness cohort report (self-contained HTML)
     cli.py / __main__.py # `dicom-discovery` commands: demo / index / rt-check / completeness / report / job / doctor
     job.py               # unattended scheduled run (run folders, latest/, status, lock, retention)
     doctor.py            # environment report + share/output probes (`doctor`)
@@ -298,5 +299,5 @@ docs/NAS_DEPLOYMENT.md                # NAS deployment guide (French)
 deploy/standalone/                    # PyInstaller spec + entry point for the frozen binary
 docs/RELEASING.md                     # how a version is tagged, drafted and published
 docs/STANDALONE.md                    # the no-Python, double-click path (French)
-tests/                                # pytest suite (209 tests), synthetic + real public data
+tests/                                # pytest suite (288 tests), synthetic + real public data
 ```

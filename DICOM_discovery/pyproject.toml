@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "DICOM_discovery"
-version = "0.11.1"
+version = "0.12.0"
 description = "Cohort-level QC for longitudinal radiotherapy (DICOM-RT) data."
 readme = "README.md"
 requires-python = ">=3.9"

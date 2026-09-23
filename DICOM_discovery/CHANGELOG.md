@@ -4,6 +4,41 @@ All notable changes to **DICOM_discovery**. The package began as a single-instit
 data-curation script and was rebuilt, in council-reviewed increments, into an adaptive
 cohort-QC tool.
 
+## 0.12.0 — Completeness redesigned: a cohort gap table, not a heatmap (2026-09-23)
+- **Why the view exists at all.** On the synthetic longitudinal cohort, patient L004 is
+  graded `OK` by the RT integrity tab — its treatment chain is complete and consistent —
+  while it has lost all three follow-up MRIs (M3, M6, M12). The RT view structurally cannot
+  see that; completeness is what makes a patient like L004 visible before a longitudinal
+  study gets built on them.
+- **The section now leads with a cohort gap table** (`Timepoint | Modality | Patients
+  missing | Who`), one row per (timepoint, modality) pair that is missing for at least one
+  patient, worst first — "chase the M6 MR for these two patients" is the action a QC round
+  actually takes. The per-patient grid sits below it, collapsed by default inside a native
+  `<details>` drill-down, everything it had before (filter, "only incomplete" toggle, sticky
+  header, CSV export) intact. With no gaps at all, the table is replaced by a single line,
+  `No gap: every expected object is present.`, instead of rendering empty.
+- **The old heatmap was a liability, not just ugly.** 24 flat `timepoint | modality` column
+  labels, tilted -45 degrees, produced 2,352 cells and a 4,120 px tall figure at 98 patients
+  — of which 66% were grey "not expected" boxes carrying no information, and every one of
+  them coded by colour alone.
+  The grid now has one column per protocol timepoint (4, not 24), a cell with nothing
+  expected draws no ink at all, and every state (present/missing/extra/unmapped) is carried
+  four ways — CSS class, glyph, a screen-reader-only word, and an `aria-label` — so the page
+  reads without colour.
+- **A worst-gap KPI and a protocol line** now sit above both the gap table and the grid: a
+  headline count of patients complete, the most-missed timepoint/modality pair and how many
+  patients it affects, a "nothing expected" segment kept separate from "100% complete" (a
+  patient with zero expected objects is not the same claim as one with 8/8 present, and the
+  ruling keeps them visually distinct), and a note for timepoint cells that could not be
+  placed on the protocol window at all. The protocol line states, once, what each timepoint
+  actually expects (`M12  day 360 +/-60  MR`), so a MISSING chip is a claim a reader can
+  check rather than an unexplained verdict.
+- **The standalone completeness page drops its Plotly payload.** The old file embedded the
+  whole charting bundle to draw coloured rectangles: 4.9 MB for a 5-patient demo. The new
+  page has no chart library and no external reference at all (no `<script src=`, no
+  `<link href=`, opens air-gapped by double-click) — 38 KB for the same 5 patients, ~274 KB
+  at 98 patients.
+
 ## 0.11.1 — the Action column speaks to the clinician (2026-09-23)
 - **Recommended actions are now plain English**, not French, and each names the object it is
   about: "Re-export RTDOSE from the planning system or PACS" instead of "récupérer le(s)
