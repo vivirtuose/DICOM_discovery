@@ -534,35 +534,40 @@ def test_the_gap_table_is_ordered_worst_first_as_given():
     assert pairs == [("M12", "MR"), ("baseline", "CT")]
 
 
-def test_a_gap_with_more_than_eight_patients_is_truncated_with_a_count():
-    """Beyond 8 names, show 8 and '+N more' — a 98-name cell is not a table cell.
+def test_a_gap_past_the_inline_limit_moves_the_rest_into_a_disclosure():
+    """Beyond 15 names, show 15 and put the rest behind a "+N more" disclosure.
 
-    The full list stays in the CSV export, so nothing is lost. Fails if the cut-off moves
-    or the remainder marker disappears, which would either wreck the layout or hide the
-    true size of the gap.
+    A hover tooltip was not enough: the overflow names have to be reachable by click and by
+    keyboard, and selectable and copyable once open, because they are the work list. Fails if
+    the cut-off moves, if the remainder marker disappears (hiding the true size of the gap),
+    or if the hidden names stop being present in the document.
     """
-    patients = [f"L{i:03d}" for i in range(1, 13)]
-    gaps = [{"timepoint": "M6", "modality": "MR", "n_patients": 12, "patients": patients}]
+    patients = [f"L{i:03d}" for i in range(1, 21)]
+    gaps = [{"timepoint": "M6", "modality": "MR", "n_patients": 20, "patients": patients}]
     html_text = completeness_section_html(GRID_TWO, KPIS_TWO, TINY_PROTOCOL, gaps)
     who = re.search(r"<td class='gwho'[^>]*>(.*?)</td>", html_text, re.S).group(1)
-    for pid in patients[:8]:
-        assert pid in who
-    for pid in patients[8:]:
-        assert pid not in who
-    assert "+4 more" in who
+
+    inline, _, disclosure = who.partition("<details")
+    for pid in patients[:15]:
+        assert pid in inline, f"{pid} should be listed inline"
+    for pid in patients[15:]:
+        assert pid not in inline, f"{pid} should have moved into the disclosure"
+        assert pid in disclosure, f"{pid} vanished instead of moving into the disclosure"
+    assert "+5 more" in who
+    assert "<summary>" in who, "the overflow must be a disclosure, not a tooltip"
 
 
-def test_a_gap_with_exactly_eight_patients_is_not_truncated():
-    """Eight names fit; no '+0 more' marker may appear.
+def test_a_gap_at_the_inline_limit_is_not_truncated():
+    """Fifteen names fit; no disclosure and no '+0 more' marker may appear.
 
     Fails on an off-by-one in the cut-off.
     """
-    patients = [f"L{i:03d}" for i in range(1, 9)]
-    gaps = [{"timepoint": "M6", "modality": "MR", "n_patients": 8, "patients": patients}]
+    patients = [f"L{i:03d}" for i in range(1, 16)]
+    gaps = [{"timepoint": "M6", "modality": "MR", "n_patients": 15, "patients": patients}]
     html_text = completeness_section_html(GRID_TWO, KPIS_TWO, TINY_PROTOCOL, gaps)
     who = re.search(r"<td class='gwho'[^>]*>(.*?)</td>", html_text, re.S).group(1)
     assert all(pid in who for pid in patients)
-    assert "more" not in who
+    assert "more" not in who and "<details" not in who
 
 
 def test_a_cohort_with_no_gap_says_so_instead_of_rendering_an_empty_table():

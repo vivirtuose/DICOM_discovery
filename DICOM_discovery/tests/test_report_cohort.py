@@ -580,6 +580,21 @@ class TestFollowUpMergedIntoTheIntegrityTable:
         # In this fixture both engines see one index, so nothing is orphaned and no note fires.
         assert "have no row below" not in html_text
 
+    def test_the_drill_down_gives_each_fact_its_own_card(self, rendered_html):
+        """Six facts flowed together in one wrapping strip read as one paragraph of bold
+        labels. Each gets a bordered card, and the left edge says what kind of fact it is:
+        neutral for description, red for the problem, green for the instruction."""
+        html_text, _ = rendered_html
+        assert "class='detail-meta issue'" in html_text, "the problem card is not marked"
+        assert "class='detail-meta act'" in html_text, "the instruction card is not marked"
+        assert "class='detail-meta wide'" in html_text, (
+            "the wide facts (RT chain, follow-up) must span the row rather than be squeezed"
+        )
+        css = html_text.split("<style>", 1)[1].split("</style>", 1)[0]
+        meta = css.split(".detail-meta{")[1].split("}")[0]
+        assert "border:1px solid" in meta and "border-left:3px" in meta
+        assert "max-width:34ch" not in meta, "the card sets the measure, not a ch cap"
+
     def test_the_displaced_study_counts_survive_in_the_drill_down(self, rendered_html):
         """Studies and RT studies left the table to make room. They did not leave the report:
         dropping a column has to mean moving the number, not losing it."""

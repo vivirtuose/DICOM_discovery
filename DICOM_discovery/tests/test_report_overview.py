@@ -222,3 +222,69 @@ def test_a_manifest_without_the_scan_counters_still_renders(missing):
     manifest.pop(missing)
     ov = cohort_overview(_table({"patient_id": "P1"}), manifest)
     assert overview_section_html(ov)
+
+
+# --------------------------------------------------------------------------- #
+# The RT verdict pie
+# --------------------------------------------------------------------------- #
+def test_the_verdict_pie_draws_the_integrity_tab_s_own_counts():
+    """The overview borrows the counts, it does not compute a second opinion about them."""
+    ov = cohort_overview(_table({"patient_id": "P1"}), {},
+                         verdicts={"OK": 6, "WARN": 4, "INCOMPLETE": 2, "NO_RT": 0})
+    assert ov["verdicts"] == {"OK": 6, "WARN": 4, "INCOMPLETE": 2, "NO_RT": 0}
+    html = overview_section_html(ov)
+    assert "RT verdicts across the cohort" in html
+    assert html.count("class='ovpie-sl'") == 3, "a zero-count verdict must not draw a slice"
+    assert "OK: 6 of 12 patients (50%)" in html
+
+
+def test_a_single_verdict_is_drawn_as_a_circle_not_a_degenerate_wedge():
+    """A 360-degree arc collapses to a point, which draws nothing at all. One verdict for the
+    whole cohort has to become a circle."""
+    html = overview_section_html(cohort_overview(
+        _table({"patient_id": "P1"}), {}, verdicts={"OK": 9}))
+    assert "<circle class='ovpie-sl'" in html
+    assert "<path class='ovpie-sl'" not in html
+
+
+def test_the_pie_wedges_meet_without_leaving_a_gap():
+    """Each wedge starts where the last ended. A wedge that does not close leaves a sliver of
+    empty pie that reads as an unlabelled fifth verdict."""
+    import re
+    html = overview_section_html(cohort_overview(
+        _table({"patient_id": "P1"}), {}, verdicts={"OK": 3, "WARN": 2, "INCOMPLETE": 1}))
+    paths = re.findall(r"<path class='ovpie-sl' d='([^']*)'", html)
+    assert len(paths) == 3
+    ends = [re.search(r"1 (-?[\d.]+) (-?[\d.]+) Z$", d).groups() for d in paths]
+    starts = [re.search(r"^M [\d.]+ [\d.]+ L (-?[\d.]+) (-?[\d.]+)", d).groups() for d in paths]
+    for i in range(1, 3):
+        assert starts[i] == ends[i - 1], "wedge does not start where the previous one ended"
+    # The last wedge closes the circle: it ends where the first one began.
+    assert ends[-1] == starts[0]
+
+
+def test_no_pie_is_drawn_when_no_verdict_was_supplied():
+    """The standalone overview can be rendered without the integrity engine having run. An
+    empty pie of zeroes would claim a cohort with no verdicts at all."""
+    html = overview_section_html(cohort_overview(_table({"patient_id": "P1"}), {}))
+    assert "ovpie" not in html
+
+
+# --------------------------------------------------------------------------- #
+# Typography and measure
+# --------------------------------------------------------------------------- #
+def test_no_block_caps_its_own_text_short_of_the_card_edge():
+    """A measure set in `ch` at 12px capped the lede near 500px, so every block ended in a
+    half-page of white that read as missing content. The card sets the measure now."""
+    css = overview_styles()
+    lede = css.split(".ovlede{")[1].split("}")[0]
+    assert "max-width" not in lede
+
+
+def test_block_headings_are_bigger_than_body_text_and_carry_colour():
+    """Five blocks whose headings looked like bold body text read as one long document with
+    no landmarks."""
+    css = overview_styles()
+    heading = css.split(".ovh{")[1].split("}")[0]
+    assert "font-size:17px" in heading
+    assert "var(--accent)" in heading

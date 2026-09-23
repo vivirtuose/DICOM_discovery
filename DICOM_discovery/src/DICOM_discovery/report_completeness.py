@@ -388,9 +388,10 @@ def _grid_html(grid: List[dict], protocol: Protocol) -> str:
             f"<tbody>{rows}</tbody></table></div>")
 
 
-#: Names shown inline in a gap row before the list is cut short. Eight ids fit a table cell
-#: at a readable size; the full list is always in the CSV export, so nothing is lost.
-_WHO_LIMIT = 8
+#: Names shown inline in a gap row before the rest move into a disclosure. Fifteen ids still
+#: read as a list rather than a wall; past that the row would set the height of the whole
+#: table for one crowded gap.
+_WHO_LIMIT = 15
 
 
 def gap_table_html(gaps: List[dict]) -> str:
@@ -407,19 +408,21 @@ def gap_table_html(gaps: List[dict]) -> str:
     rows = []
     for gap in gaps:
         patients = list(gap.get("patients") or [])
-        shown = patients[:_WHO_LIMIT]
-        who = ", ".join(_esc(p) for p in shown)
-        title = ""
-        if len(patients) > _WHO_LIMIT:
-            who += (f" <span class='gmore'>+{len(patients) - _WHO_LIMIT} more</span>")
-            # The names that did not fit are still one hover away, and all of them are in the
-            # CSV export - a truncated cell must never be the only place a patient existed.
-            title = f" title='{_esc(', '.join(patients))}'"
+        who = ", ".join(_esc(p) for p in patients[:_WHO_LIMIT])
+        rest = patients[_WHO_LIMIT:]
+        if rest:
+            # A native disclosure, not a tooltip: the names that did not fit have to be
+            # reachable by click and by keyboard, selectable and copyable. A hover title is
+            # none of those, and a truncated cell must never be the only place a patient
+            # existed.
+            who += (f"<details class='gmore'><summary>+{len(rest)} more</summary>"
+                    f"<div class='gmore-list mono'>{', '.join(_esc(p) for p in rest)}</div>"
+                    f"</details>")
         rows.append(
             f"<tr class='grow'><td class='gtp'>{_esc(gap['timepoint'])}</td>"
             f"<td class='gmod'>{_esc(gap['modality'])}</td>"
             f"<td class='gnum mono'>{int(gap['n_patients'])}</td>"
-            f"<td class='gwho'{title}>{who}</td></tr>"
+            f"<td class='gwho'>{who}</td></tr>"
         )
     return (f"<table class='grid gaptable' id='comp-gaps'>"
             f"<thead><tr><th>Timepoint</th><th>Modality</th>"
@@ -511,7 +514,16 @@ def completeness_styles() -> str:
 .gaptable th.gnum,.gaptable td.gnum{text-align:right;white-space:nowrap}
 .gaptable td.gnum{font-weight:700;color:var(--incomplete)}
 .gaptable .gwho{font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.6}
-.gmore{font-family:var(--sans);font-style:italic;color:var(--dim)}
+.gmore{display:inline-block;margin-left:4px;font-family:var(--sans)}
+.gmore>summary{cursor:pointer;display:inline-block;list-style:none;font-size:11px;
+  font-style:italic;color:var(--accent);padding:0 5px;border:1px solid var(--accent-line);
+  border-radius:9px;background:var(--accent-soft)}
+.gmore>summary::-webkit-details-marker{display:none}
+.gmore>summary:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent-soft)}
+.gmore[open]>summary{color:var(--muted)}
+.gmore-list{display:block;margin-top:6px;padding:7px 9px;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:var(--radius-sm);font-size:11px;
+  color:var(--muted);line-height:1.7;max-height:190px;overflow:auto}
 /* A clean cohort is a result, not an empty table — it reads as a sentence. */
 .nogap{
   color:var(--ok);font-size:13px;margin:0 0 20px;padding:11px 14px;

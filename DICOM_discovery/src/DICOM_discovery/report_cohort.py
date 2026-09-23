@@ -478,22 +478,27 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
             # the recommended action — then the per-study findings beneath it.
             fu_block = ""
             if fu:
-                fu_block = (f"<div class='detail-meta'><b>Protocol follow-up</b>"
-                            f"<span>{followup_status_html(fu)}"
+                fu_block = (f"<div class='detail-meta wide'><b>Protocol follow-up</b>"
+                            f"<span class='dm-body'>{followup_status_html(fu)}"
                             f"{followup_detail_html(fu, timepoints)}</span></div>")
+            # Each fact gets its own bordered card, and the border says what kind of fact it
+            # is: neutral for description, red for the problem, green for the instruction.
+            # Six facts flowed together in one wrapping strip read as one paragraph of labels.
             recap = (
                 "<div class='detail-summary'>"
-                f"<div class='detail-meta'><b>Verdict</b>{_verdict_pill(r['rt_status'])}{frag}</div>"
-                f"<div class='detail-meta'><b>Data presence</b>"
-                f"{_presence_strip_html(r['chain'], r['targets'], detailed=True)}</div>"
+                f"<div class='detail-meta'><b>Verdict</b>"
+                f"<span class='dm-body'>{_verdict_pill(r['rt_status'])}{frag}</span></div>"
                 f"<div class='detail-meta'><b>Studies</b>"
-                f"<span class='mono'>{r['n_studies']}</span>"
-                f"<span class='dim'>of which {r['n_rt_studies']} carry RT objects</span></div>"
+                f"<span class='dm-body'><span class='dm-big mono'>{r['n_studies']}</span>"
+                f"<span class='dim'>of which {r['n_rt_studies']} carry RT objects</span></span></div>"
+                f"<div class='detail-meta wide'><b>RT chain</b>"
+                f"<span class='dm-body'>"
+                f"{_presence_strip_html(r['chain'], r['targets'], detailed=True)}</span></div>"
                 f"{fu_block}"
-                f"<div class='detail-meta'><b>Issue</b>"
-                f"<span>{_esc(r['reason']) or '—'}</span></div>"
-                f"<div class='detail-meta'><b>Recommended action</b>"
-                f"<span>{_esc(r['action']) or '—'}</span></div>"
+                f"<div class='detail-meta issue'><b>Issue</b>"
+                f"<span class='dm-body'>{_esc(r['reason']) or '—'}</span></div>"
+                f"<div class='detail-meta act'><b>Recommended action</b>"
+                f"<span class='dm-body'>{_esc(r['action']) or '—'}</span></div>"
                 "</div>"
             )
             body.append(
@@ -730,11 +735,24 @@ main{max-width:1240px;margin:0 auto;padding:26px 30px 48px}
   margin:2px 0 8px;padding:16px 18px;
 }
 .detail-summary{
-  display:flex;flex-wrap:wrap;align-items:flex-start;gap:16px 30px;
-  padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--line);
+  display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));
+  padding-bottom:16px;margin-bottom:16px;border-bottom:1px solid var(--line);
 }
-.detail-meta{display:flex;flex-direction:column;gap:6px;font-size:12.5px;max-width:34ch}
-.detail-meta>b{color:var(--muted);font-weight:600;font-size:10.5px;letter-spacing:.03em;text-transform:uppercase}
+/* Each fact is a card with its own border, so six of them read as six things rather than as
+   one wrapping paragraph of bold labels. The left edge carries the kind of fact. */
+.detail-meta{
+  display:flex;flex-direction:column;gap:7px;font-size:12.5px;
+  background:var(--surface);border:1px solid var(--line);
+  border-left:3px solid var(--line-strong);border-radius:var(--radius-sm);
+  padding:9px 12px 11px;
+}
+.detail-meta.wide{grid-column:1/-1}
+.detail-meta.issue{border-left-color:var(--incomplete)}
+.detail-meta.act{border-left-color:var(--ok)}
+.detail-meta>b{color:var(--muted);font-weight:700;font-size:10px;letter-spacing:.07em;text-transform:uppercase}
+.dm-body{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;color:var(--text);line-height:1.55}
+.detail-meta.wide .dm-body{flex-direction:column;align-items:flex-start;gap:7px}
+.dm-big{font-size:17px;font-weight:700;color:var(--ink)}
 .detail-title{font-size:11px;font-weight:650;color:var(--dim);letter-spacing:.04em;
   text-transform:uppercase;margin-bottom:12px}
 .study{padding:11px 0;border-top:1px solid var(--line)}
@@ -802,8 +820,10 @@ footer b{color:var(--muted)}
 /* ---- the cohort gap block: the one thing on this tab that is not per-patient ---- */
 .gapblock{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
   padding:15px 17px 17px;margin-bottom:18px;border-left:3px solid var(--incomplete)}
-.gaph{margin:0 0 4px;font-size:13px;font-weight:600;color:var(--ink)}
-.gaplede{margin:0 0 12px;font-size:12px;color:var(--muted);line-height:1.6;max-width:80ch}
+.gaph{margin:0 0 7px;font-size:17px;font-weight:700;color:var(--incomplete);
+  letter-spacing:-.011em;display:flex;align-items:center;gap:9px}
+.gaph::before{content:'';width:4px;height:17px;border-radius:2px;background:var(--incomplete)}
+.gaplede{margin:0 0 12px;font-size:12.5px;color:var(--muted);line-height:1.65}
 .gapblock .gaptable{margin-bottom:0}
 /* The follow-up badge sits under its chips: the chips say what is missing, the badge says
    how much, and stacking them keeps the column from growing a second row of text. */
@@ -1082,7 +1102,7 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
     # that the queue is about the cohort they meant; this tab answers that first, and grades
     # nothing. It borrows the unplaceable-patient count from comp_long rather than deriving
     # its own, so the front page and the completeness tab cannot disagree about it.
-    overview = cohort_overview(table, manifest, comp_long)
+    overview = cohort_overview(table, manifest, comp_long, kpis["verdicts"])
 
     page = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">

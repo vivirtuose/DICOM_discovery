@@ -203,12 +203,14 @@ def _protocol_split(comp_long: Optional[pd.DataFrame]) -> Optional[dict]:
 
 
 def cohort_overview(table: Optional[pd.DataFrame], manifest: Optional[dict] = None,
-                    comp_long: Optional[pd.DataFrame] = None) -> dict:
+                    comp_long: Optional[pd.DataFrame] = None,
+                    verdicts: Optional[dict] = None) -> dict:
     """Describe the cohort as indexed. Pure data in, plain data out.
 
-    ``comp_long`` is optional and supplies only the protocol split — the numbers this page
-    borrows from the completeness engine, so the front page and the integrity tab cannot
-    disagree about who is complete or who is ungradeable.
+    ``comp_long`` is optional and supplies only the protocol split, and ``verdicts`` the RT
+    counts the integrity tab already computed — the numbers this page borrows rather than
+    recomputes, so the front page and the tabs behind it cannot disagree about who is
+    complete, who is ungradeable, or how many patients carry which verdict.
     """
     manifest = manifest or {}
     if table is None or getattr(table, "empty", True):
@@ -243,6 +245,9 @@ def cohort_overview(table: Optional[pd.DataFrame], manifest: Optional[dict] = No
         "n_dirs_unreadable": int(manifest.get("n_dirs_unreadable", 0) or 0),
         "n_dirs_excluded": int(manifest.get("n_dirs_excluded", 0) or 0),
         "protocol_split": _protocol_split(comp_long),
+        # Straight from build_kpis: the overview draws the integrity tab's own counts, it
+        # does not compute a second opinion about them.
+        "verdicts": {str(k): int(v) for k, v in (verdicts or {}).items() if int(v) >= 0},
     }
     ov.update(_per_patient_time(table))
     return ov
@@ -553,13 +558,93 @@ def _protocol_block(ov: dict) -> str:
     )
 
 
+#: Pie geometry: r=62 inside a 150 box leaves room for the slice outlines.
+_PIE_R = 62.0
+_PIE_CX = _PIE_CY = 75.0
+
+#: What each RT verdict means in one line, so a slice is never just a colour with a code.
+_VERDICT_NOTE = {
+    "OK": "the RT chain holds together",
+    "WARN": "usable, but something needs a look",
+    "INCOMPLETE": "a link of the chain is missing",
+    "NO_RT": "no RT object at all - out of scope, not a failure",
+}
+
+
+def _pie_slice_path(a0: float, a1: float) -> str:
+    """One wedge, from angle a0 to a1 in turns, clockwise from twelve o'clock."""
+    import math
+
+    def point(turn: float) -> Tuple[float, float]:
+        rad = 2 * math.pi * turn - math.pi / 2
+        return (_PIE_CX + _PIE_R * math.cos(rad), _PIE_CY + _PIE_R * math.sin(rad))
+
+    x0, y0 = point(a0)
+    x1, y1 = point(a1)
+    large = 1 if (a1 - a0) > 0.5 else 0
+    return (f"M {_PIE_CX:.2f} {_PIE_CY:.2f} L {x0:.2f} {y0:.2f} "
+            f"A {_PIE_R:.2f} {_PIE_R:.2f} 0 {large} 1 {x1:.2f} {y1:.2f} Z")
+
+
+def _verdict_pie_block(ov: dict) -> str:
+    """The RT verdict split as a pie, under what was scanned.
+
+    Deliberately a pie and not a fourth row of counts: the question it answers is "how much
+    of this cohort is usable?", which is a proportion. The counts are beside it in the legend,
+    because a proportion is what you see and a count is what you quote.
+    """
+    from .report_cohort import VERDICT_COLORS, VERDICT_ORDER  # local: report_cohort imports us
+
+    verdicts = ov.get("verdicts") or {}
+    total = sum(verdicts.get(v, 0) for v in VERDICT_ORDER)
+    if not total:
+        return ""
+
+    shapes, legend, start = [], [], 0.0
+    for i, name in enumerate(VERDICT_ORDER):
+        n = int(verdicts.get(name, 0))
+        if n <= 0:
+            continue
+        share = n / total
+        color = VERDICT_COLORS[name]
+        if share >= 1.0:
+            # A 360-degree arc collapses to a point: one verdict for the whole cohort is a
+            # circle, not a wedge.
+            shape = (f"<circle class='ovpie-sl' cx='{_PIE_CX}' cy='{_PIE_CY}' r='{_PIE_R}' "
+                     f"fill='{color}' style='--i:{i}'>")
+        else:
+            shape = (f"<path class='ovpie-sl' d='{_pie_slice_path(start, start + share)}' "
+                     f"fill='{color}' style='--i:{i}'>")
+        tag = "circle" if share >= 1.0 else "path"
+        shapes.append(f"{shape}<title>{_esc(name)}: {n} of {total} patients "
+                      f"({round(100 * share)}%)</title></{tag}>")
+        legend.append(
+            f"<li><span class='ovdot' style='background:{color}'></span>"
+            f"<b>{_num(n)}</b><span class='ovpie-name'>{_esc(name)}</span>"
+            f"<span class='ovpie-pct mono'>{round(100 * share)}%</span>"
+            f"<span class='ovpie-note'>{_esc(_VERDICT_NOTE.get(name, ''))}</span></li>")
+        start += share
+
+    return _block(
+        "RT verdicts across the cohort",
+        "One verdict per patient, from the integrity tab - the same counts, drawn. NO_RT is "
+        "not a failure: those patients carry no radiotherapy object at all, so there was no "
+        "chain to check.",
+        f"<div class='ovpie-wrap'>"
+        f"<svg class='ovpie' viewBox='0 0 150 150' role='img' "
+        f"aria-label='RT verdict split over {total} patients'>{''.join(shapes)}</svg>"
+        f"<ul class='ovlegend ovpie-legend'>{''.join(legend)}</ul></div>",
+    )
+
+
 def overview_section_html(ov: dict) -> str:
     """The whole overview tab."""
     if ov.get("empty"):
         return ("<p class='nogap'>Nothing was indexed under this root, so there is no cohort "
                 "to describe. Check the path and that the scan can read it.</p>")
     return ("<div class='overview'>"
-            + _intro_block(ov) + _scanned_block(ov) + _cohort_block(ov)
+            + _intro_block(ov) + _scanned_block(ov) + _verdict_pie_block(ov)
+            + _cohort_block(ov)
             + _time_block(ov) + _protocol_block(ov) + "</div>")
 
 
@@ -585,8 +670,15 @@ def overview_styles() -> str:
 .ovblock:nth-child(4){animation-delay:.26s}
 .ovblock:nth-child(5){animation-delay:.34s}
 @keyframes ovrise{to{opacity:1;transform:none}}
-.ovh{margin:0 0 4px;font-size:13.5px;font-weight:600;color:var(--ink);letter-spacing:.01em}
-.ovlede{margin:0 0 14px;font-size:12px;color:var(--muted);line-height:1.65;max-width:82ch}
+/* The heading carries the block. At 13.5px in ink it read as bold body text, so five blocks
+   looked like one long document with no landmarks. */
+.ovh{margin:0 0 7px;font-size:17px;font-weight:700;color:var(--accent);letter-spacing:-.011em;
+  display:flex;align-items:center;gap:9px}
+.ovh::before{content:'';width:4px;height:17px;border-radius:2px;background:var(--accent);
+  flex:none}
+/* No max-width. A measure set in `ch` at 12px capped the lede near 500px, so every block
+   ended in a half-page of white that read as missing content. The card sets the measure. */
+.ovlede{margin:0 0 14px;font-size:12.5px;color:var(--muted);line-height:1.65}
 
 /* ---- the intro card: what the tool is, before what the cohort is ---- */
 .ovintro{border-left:3px solid var(--accent-line)}
@@ -598,6 +690,8 @@ def overview_styles() -> str:
 .ovfeat:hover{border-color:var(--accent-line);transform:translateY(-1px)}
 .ovfeat b{display:block;font-size:12px;color:var(--ink);margin-bottom:3px}
 .ovfeat span{font-size:11.5px;color:var(--dim);line-height:1.55}
+/* A feature card is a column in a grid: its text fills it, and never stops early. */
+.ovfeat b,.ovfeat span{max-width:none}
 .ovsource{margin:13px 0 0;font-size:11.5px;color:var(--dim)}
 .ovsrc-k{display:inline-block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;
   color:var(--muted);margin-right:8px}
@@ -664,6 +758,22 @@ def overview_styles() -> str:
 .ovlegend b{color:var(--ink);font-family:var(--mono)}
 .ovdot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:7px}
 
+/* ---- RT verdict pie ---- */
+.ovpie-wrap{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.ovpie{width:150px;height:150px;flex:none}
+.ovpie-sl{stroke:var(--surface);stroke-width:1.5;transform-origin:75px 75px;
+  opacity:0;transform:scale(.72);
+  animation:ovpop .5s cubic-bezier(.22,1.2,.4,1) forwards;
+  animation-delay:calc(.3s + var(--i)*.09s);transition:opacity .15s}
+@keyframes ovpop{to{opacity:1;transform:scale(1)}}
+.ovpie-wrap:hover .ovpie-sl{opacity:.55}
+.ovpie-wrap .ovpie-sl:hover{opacity:1}
+.ovpie-legend{flex:1;min-width:240px}
+.ovpie-legend li{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.ovpie-name{font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;color:var(--ink)}
+.ovpie-pct{color:var(--dim);font-size:11px}
+.ovpie-note{color:var(--dim);font-size:11px;font-style:italic}
+
 /* ---- exact numbers, one click away ---- */
 .ovdetails{margin-top:14px}
 .ovdetails>summary{cursor:pointer;font-size:11.5px;font-weight:600;color:var(--accent);
@@ -682,6 +792,7 @@ def overview_styles() -> str:
 @media (prefers-reduced-motion:reduce){
   .ovblock,.ovfeat{opacity:1;transform:none;animation:none}
   .ovbar-fill{animation:none;width:var(--pct)}
+  .ovpie-sl{animation:none;opacity:1;transform:none}
   .ovcol-fill{animation:none;height:var(--h)}
   .ovring-seg{animation:none;opacity:1}
   .ovfeat:hover{transform:none}
