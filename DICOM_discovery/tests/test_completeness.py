@@ -15,6 +15,8 @@ from DICOM_discovery import (  # noqa: E402
     CellState,
     Protocol,
     build_completeness,
+    completeness_grid,
+    completeness_kpis,
     load_protocol,
     patient_completeness,
     render_completeness_map,
@@ -79,6 +81,183 @@ def test_longitudinal_completeness(longitudinal):
     for tp in ("M3", "M6", "M12"):
         assert _cell(state_df, "L004", tp, "MR") == int(CellState.MISSING)
     assert (state_df.loc["L005"] == int(CellState.EXTRA)).any()
+
+
+def _long(rows):
+    """Build a long_df-shaped frame directly, preserving row order (it encodes protocol order)."""
+    cols = ["patient", "timepoint", "modality", "expected", "observed", "state"]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def test_completeness_grid_orders_patients_worst_first(longitudinal):
+    """completeness_grid must rank by n_missing descending; a smaller n_missing anywhere
+    out of order would mean the sort key (or its tie-break) is wrong."""
+    _root, idx = longitudinal
+    _state_df, _hover, long_df = build_completeness(idx.table, DEFAULT_PROTOCOL)
+    grid = completeness_grid(long_df)
+    n_missing = [p["n_missing"] for p in grid]
+    assert n_missing == sorted(n_missing, reverse=True)
+    # tie-break is patient ascending: within any run of equal n_missing, patients climb.
+    for a, b in zip(grid, grid[1:]):
+        if a["n_missing"] == b["n_missing"]:
+            assert a["patient"] <= b["patient"]
+
+
+def test_completeness_grid_matches_patient_completeness(longitudinal):
+    """Per-patient aggregate fields must come from patient_completeness, not be recomputed —
+    if completeness_grid ever diverged (e.g. a different rounding), this would catch it."""
+    _root, idx = longitudinal
+    _state_df, _hover, long_df = build_completeness(idx.table, DEFAULT_PROTOCOL)
+    grid = completeness_grid(long_df)
+    summary = patient_completeness(long_df).set_index("patient")
+    by_patient = {p["patient"]: p for p in grid}
+    assert by_patient["L002"]["n_missing"] == 1
+    for patient, row in summary.iterrows():
+        g = by_patient[patient]
+        assert g["n_expected"] == int(row["n_expected"])
+        assert g["n_present"] == int(row["n_present"])
+        assert g["n_missing"] == int(row["n_missing"])
+        assert g["pct_complete"] == float(row["pct_complete"])
+
+
+def test_completeness_grid_cell_state_is_worst_of_its_items():
+    """A cell's state is the worst item state present (MISSING > UNMAPPED > EXTRA > PRESENT).
+    If the cell picked e.g. the *first* item instead of the worst, this would fail."""
+    long_df = _long([
+        ["A", "baseline", "CT", True, True, "PRESENT"],
+        ["A", "baseline", "MR", True, False, "MISSING"],
+        ["A", "M3", "CT", False, True, "EXTRA"],
+        ["A", "M3", "MR", True, True, "PRESENT"],
+    ])
+    grid = completeness_grid(long_df)
+    cells = {c["timepoint"]: c for c in grid[0]["cells"]}
+    assert cells["baseline"]["state"] == "MISSING"
+    assert cells["M3"]["state"] == "EXTRA"
+
+
+def test_completeness_grid_excludes_na_items_but_keeps_the_cell():
+    """NA rows ('not expected and not observed') must produce no item — a renderer drawing
+    every item would show clutter where nothing was ever asked for."""
+    long_df = _long([
+        ["A", "baseline", "CT", True, True, "PRESENT"],
+        ["A", "baseline", "PT", False, False, "NA"],
+    ])
+    grid = completeness_grid(long_df)
+    cell = grid[0]["cells"][0]
+    assert len(cell["items"]) == 1
+    assert cell["items"][0]["modality"] == "CT"
+
+
+def test_completeness_grid_all_na_timepoint_yields_empty_na_cell():
+    """A timepoint whose items are all NA still gets a cell (state NA, items empty) — dropping
+    the cell entirely would break 'one entry per protocol timepoint'."""
+    long_df = _long([
+        ["A", "baseline", "CT", True, True, "PRESENT"],
+        ["A", "M3", "CT", False, False, "NA"],
+        ["A", "M3", "MR", False, False, "NA"],
+    ])
+    grid = completeness_grid(long_df)
+    m3 = [c for c in grid[0]["cells"] if c["timepoint"] == "M3"][0]
+    assert m3["items"] == []
+    assert m3["state"] == "NA"
+
+
+def test_completeness_grid_preserves_protocol_order_not_alphabetical():
+    """Timepoint order must follow appearance order in long_df, not string sort — 'M12' sorts
+    before 'M3' alphabetically, which would silently reorder a real protocol's timeline."""
+    long_df = _long([
+        ["A", "baseline", "CT", True, True, "PRESENT"],
+        ["A", "M3", "CT", True, True, "PRESENT"],
+        ["A", "M12", "CT", True, True, "PRESENT"],
+    ])
+    grid = completeness_grid(long_df)
+    assert [c["timepoint"] for c in grid[0]["cells"]] == ["baseline", "M3", "M12"]
+
+
+def test_completeness_grid_patient_with_only_na_cells_still_appears():
+    """A patient absent from patient_completeness (nothing expected) must still surface in the
+    grid — dropping them would hide a patient from the QC registry entirely."""
+    long_df = _long([
+        ["Z", "baseline", "CT", False, False, "NA"],
+        ["Z", "M3", "CT", False, False, "NA"],
+    ])
+    grid = completeness_grid(long_df)
+    assert len(grid) == 1
+    row = grid[0]
+    assert row["patient"] == "Z"
+    assert row["n_expected"] == 0 and row["n_present"] == 0 and row["n_missing"] == 0
+    assert all(c["items"] == [] and c["state"] == "NA" for c in row["cells"])
+
+
+def test_completeness_grid_empty_long_df_returns_empty_list():
+    assert completeness_grid(pd.DataFrame(
+        columns=["patient", "timepoint", "modality", "expected", "observed", "state"])) == []
+
+
+def test_completeness_kpis_basic_counts(longitudinal):
+    """n_patients/n_complete/n_incomplete must partition the cohort exactly (no double count,
+    none dropped) — a patient miscounted here would silently skew a cohort-level KPI."""
+    _root, idx = longitudinal
+    _state_df, _hover, long_df = build_completeness(idx.table, DEFAULT_PROTOCOL)
+    kpis = completeness_kpis(long_df)
+    grid = completeness_grid(long_df)
+    assert kpis["n_patients"] == len(grid)
+    assert kpis["n_complete"] + kpis["n_incomplete"] == kpis["n_patients"]
+    assert kpis["n_complete"] == sum(1 for p in grid if p["n_missing"] == 0)
+
+
+def test_completeness_kpis_worst_gap_is_the_most_common_missing_pair():
+    """worst_gap must pick the (timepoint, modality) that is MISSING for the most patients,
+    not merely the first MISSING cell encountered."""
+    long_df = _long([
+        ["A", "baseline", "MR", True, False, "MISSING"],
+        ["B", "baseline", "MR", True, False, "MISSING"],
+        ["C", "baseline", "CT", True, False, "MISSING"],
+    ])
+    kpis = completeness_kpis(long_df)
+    assert kpis["worst_gap"] == {"timepoint": "baseline", "modality": "MR", "n_patients": 2}
+
+
+def test_completeness_kpis_worst_gap_tie_breaks_by_protocol_order_then_modality():
+    """Equal MISSING counts must resolve deterministically: earlier protocol timepoint wins,
+    then modality name — otherwise the KPI would flap between equally-valid runs."""
+    long_df = _long([
+        ["A", "baseline", "CT", True, False, "MISSING"],
+        ["B", "M3", "MR", True, False, "MISSING"],
+    ])
+    kpis = completeness_kpis(long_df)
+    assert kpis["worst_gap"] == {"timepoint": "baseline", "modality": "CT", "n_patients": 1}
+
+
+def test_completeness_kpis_n_unmapped_counts_unmapped_cells():
+    """n_unmapped counts UNMAPPED *cells* across the cohort — used to flag patients whose
+    dates couldn't be placed on the timeline, distinct from actual missing data."""
+    long_df = _long([
+        ["A", "baseline", "CT", True, False, "UNMAPPED"],
+        ["A", "M3", "MR", True, False, "UNMAPPED"],
+        ["B", "baseline", "CT", True, True, "PRESENT"],
+    ])
+    kpis = completeness_kpis(long_df)
+    assert kpis["n_unmapped"] == 2
+
+
+def test_completeness_kpis_no_missing_means_worst_gap_none_and_all_complete():
+    """A cohort with nothing MISSING must report worst_gap: None and n_complete == n_patients —
+    covers the 'good cohort' edge case explicitly, not just by absence of a crash."""
+    long_df = _long([
+        ["A", "baseline", "CT", True, True, "PRESENT"],
+        ["B", "baseline", "CT", True, True, "PRESENT"],
+    ])
+    kpis = completeness_kpis(long_df)
+    assert kpis["worst_gap"] is None
+    assert kpis["n_complete"] == kpis["n_patients"] == 2
+
+
+def test_completeness_kpis_empty_long_df_returns_zeros_without_raising():
+    empty = pd.DataFrame(columns=["patient", "timepoint", "modality", "expected", "observed", "state"])
+    kpis = completeness_kpis(empty)
+    assert kpis == {"n_patients": 0, "n_complete": 0, "n_incomplete": 0,
+                    "pct_complete_mean": 0.0, "worst_gap": None, "n_unmapped": 0}
 
 
 def test_render_map_is_self_contained(longitudinal, tmp_path):

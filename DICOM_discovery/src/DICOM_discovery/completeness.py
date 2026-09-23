@@ -188,6 +188,98 @@ def build_completeness(table: pd.DataFrame, protocol: Protocol = DEFAULT_PROTOCO
     return state_df, hover_df, long_df
 
 
+#: Worst-of ranking for a grid cell holding several items (e.g. two modalities at one
+#: timepoint): MISSING is the actionable state and must win over everything, UNMAPPED must
+#: still outrank EXTRA/PRESENT so a garbled-date patient reads as "can't tell", not "fine".
+_CELL_RANK = {"NA": 0, "PRESENT": 1, "EXTRA": 2, "UNMAPPED": 3, "MISSING": 4}
+
+
+def completeness_grid(long_df: pd.DataFrame) -> List[dict]:
+    """Reshape long_df into one row per patient, ready for a renderer to walk with no pandas.
+
+    Ordered worst-first (most MISSING on top) because a QC registry exists to be acted on:
+    the patients needing attention belong where they're seen first, same idea as
+    ``order_for_review`` in rt_integrity.py.
+    """
+    if long_df is None or long_df.empty:
+        return []
+
+    summary = patient_completeness(long_df).set_index("patient")
+    grid: List[dict] = []
+    for patient, pdf in long_df.groupby("patient", sort=False):
+        # Row order within a patient's slice is long_df's own order, which build_completeness
+        # writes in protocol.timepoints order — reuse it instead of sorting (M12 must not
+        # come before M3).
+        timepoints: List[str] = []
+        for tp in pdf["timepoint"]:
+            if tp not in timepoints:
+                timepoints.append(tp)
+
+        cells = []
+        for tp in timepoints:
+            items = [{"modality": row["modality"], "state": row["state"]}
+                     for _, row in pdf[pdf["timepoint"] == tp].iterrows()
+                     if row["state"] != "NA"]
+            state = max((it["state"] for it in items), key=lambda s: _CELL_RANK[s], default="NA")
+            cells.append({"timepoint": tp, "state": state, "items": items})
+
+        if patient in summary.index:
+            srow = summary.loc[patient]
+            n_expected, n_present = int(srow["n_expected"]), int(srow["n_present"])
+            n_missing, pct_complete = int(srow["n_missing"]), float(srow["pct_complete"])
+        else:
+            # Not in patient_completeness at all — either fully UNMAPPED (excluded there by
+            # design, see module docstring) or nothing was ever expected of them. Either way
+            # there is nothing to be missing, so they read as vacuously complete rather than
+            # dropped from the registry.
+            n_expected = n_present = n_missing = 0
+            pct_complete = 100.0
+
+        grid.append({"patient": patient, "n_expected": n_expected, "n_present": n_present,
+                     "n_missing": n_missing, "pct_complete": pct_complete, "cells": cells})
+
+    grid.sort(key=lambda p: (-p["n_missing"], p["patient"]))
+    return grid
+
+
+def completeness_kpis(long_df: pd.DataFrame) -> dict:
+    """Cohort-level numbers for a dashboard header — built from completeness_grid so the
+    per-patient math (including the vacuous/UNMAPPED convention) never drifts from the grid.
+    """
+    grid = completeness_grid(long_df)
+    if not grid:
+        return {"n_patients": 0, "n_complete": 0, "n_incomplete": 0,
+                "pct_complete_mean": 0.0, "worst_gap": None, "n_unmapped": 0}
+
+    n_patients = len(grid)
+    n_complete = sum(1 for p in grid if p["n_missing"] == 0)
+    n_unmapped = sum(1 for p in grid for c in p["cells"] if c["state"] == "UNMAPPED")
+    pct_complete_mean = round(sum(p["pct_complete"] for p in grid) / n_patients, 1)
+
+    # Protocol order for the tie-break comes from any one patient's cells: build_completeness
+    # gives every patient the same timepoint sequence, so the first patient's order will do.
+    tp_order = {tp: i for i, tp in enumerate(c["timepoint"] for c in grid[0]["cells"])}
+
+    gap_counts: Dict[Tuple[str, str], int] = {}
+    for p in grid:
+        for cell in p["cells"]:
+            for item in cell["items"]:
+                if item["state"] == "MISSING":
+                    key = (cell["timepoint"], item["modality"])
+                    gap_counts[key] = gap_counts.get(key, 0) + 1
+
+    worst_gap: Optional[dict] = None
+    if gap_counts:
+        worst_count = max(gap_counts.values())
+        tied = [k for k, v in gap_counts.items() if v == worst_count]
+        tp, mod = min(tied, key=lambda k: (tp_order.get(k[0], len(tp_order)), k[1]))
+        worst_gap = {"timepoint": tp, "modality": mod, "n_patients": worst_count}
+
+    return {"n_patients": n_patients, "n_complete": n_complete,
+            "n_incomplete": n_patients - n_complete, "pct_complete_mean": pct_complete_mean,
+            "worst_gap": worst_gap, "n_unmapped": n_unmapped}
+
+
 def patient_completeness(long_df: pd.DataFrame) -> pd.DataFrame:
     """Per-patient completeness over the *mappable* cells (UNMAPPED patients excluded)."""
     if long_df.empty:
