@@ -1,6 +1,7 @@
 # DICOM Discovery — EpiBrainRad
 
 [![CI](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml/badge.svg)](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/dicom-discovery)](https://pypi.org/project/DICOM-discovery/)
 ![Python](https://img.shields.io/badge/python-3.9%E2%80%933.14-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Use: research-only](https://img.shields.io/badge/use-research--only-orange)
@@ -74,7 +75,13 @@ Package Python structuré (`src/` layout), versionné, compatible **Python 3.9�
   `latest/`, état `last_run.json`, verrou, rétention, cache d'index ; corbeilles/instantanés
   NAS ignorés, dossiers illisibles signalés
 
-**Installation (une commande, directement depuis GitHub) :**
+**Installation (une commande) :**
+
+```bash
+pip install dicom-discovery      # ou : pipx install dicom-discovery (CLI isolé)
+```
+
+Pour suivre `master` plutôt que la dernière version publiée :
 
 ```bash
 pip install "git+https://github.com/vivirtuose/DICOM_discovery.git#subdirectory=DICOM_discovery"

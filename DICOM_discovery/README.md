@@ -1,6 +1,7 @@
 # DICOM_discovery
 
 [![CI](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml/badge.svg)](https://github.com/vivirtuose/DICOM_discovery/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/dicom-discovery)](https://pypi.org/project/DICOM-discovery/)
 ![Python](https://img.shields.io/badge/python-3.9%E2%80%933.14-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Use: research-only](https://img.shields.io/badge/use-research--only-orange)
@@ -33,17 +34,18 @@ are detected by **content** (the `DICM` preamble / a parseable SOPClassUID), not
 
 ## Install
 
-Runs on **Python 3.9–3.14**, tested in CI on Linux, macOS and Windows. One command, straight from GitHub —
-no clone needed (the package lives in the `DICOM_discovery/` subdirectory of the repo):
+Runs on **Python 3.9–3.14**, tested in CI on Linux, macOS and Windows:
 
 ```bash
-# From PyPI — available once the first release is published (see docs/RELEASING.md):
-pip install dicom-discovery          # or: pipx install dicom-discovery (isolated CLI)
-
-# Until then (or to track master), straight from GitHub — no clone needed:
-pip install "git+https://github.com/vivirtuose/DICOM_discovery.git#subdirectory=DICOM_discovery"
-
+pip install dicom-discovery      # or: pipx install dicom-discovery (isolated CLI)
 dicom-discovery --help
+```
+
+To track `master` instead of the latest release, install from the repository — no clone
+needed (the package lives in its `DICOM_discovery/` subdirectory):
+
+```bash
+pip install "git+https://github.com/vivirtuose/DICOM_discovery.git#subdirectory=DICOM_discovery"
 ```
 
 No Python on the target machine? Every release also ships a **standalone binary** for

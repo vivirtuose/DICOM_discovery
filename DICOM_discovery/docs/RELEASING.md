@@ -42,11 +42,11 @@ The **Release** workflow then:
 Review the draft, then **Publish** it. That fires `publish-pypi.yml`, which rebuilds from the
 tag and uploads to PyPI via Trusted Publishing.
 
-## After the first PyPI release
+## Published releases
 
-Update the install line in both READMEs to `pip install dicom-discovery` (currently it
-points at the `git+https://…#subdirectory=DICOM_discovery` path) and mention
-`pipx install dicom-discovery` for an isolated CLI.
+The first release, **v0.11.0 (2026-09-23)**, is on PyPI as
+[`DICOM-discovery`](https://pypi.org/project/DICOM-discovery/) — `pip install dicom-discovery`
+works regardless of case and separator, since PyPI normalises project names.
 
 ## What is *not* automated, on purpose
 
