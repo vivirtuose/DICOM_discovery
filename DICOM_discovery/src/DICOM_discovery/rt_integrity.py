@@ -353,11 +353,12 @@ def build_rt_rollup(table: pd.DataFrame) -> pd.DataFrame:
         if missing_core:
             status = Status.INCOMPLETE
             reasons.append("missing " + ", ".join(missing_core))
-            actions.append("récupérer le(s) objet(s) manquant(s) sur le PACS")
+            actions.append("Re-export " + ", ".join(missing_core) + " from the planning system or PACS")
         elif not (plan_struct_resolved and dose_plan_resolved):
             status = Status.WARN
             reasons.append("RT objects present but reference link does not resolve")
-            actions.append("vérifier le lien de référence (plan→struct / dose→plan)")
+            actions.append("Re-export the whole chain together: the plan or dose references "
+                           "an object that is absent here")
         # Planning image: CT is typical, but MR-based planning (e.g. brain radiosurgery) is
         # valid. Accept a CT *or* an MR that shares the RT frame of reference as the planning
         # image; only flag when neither is present (a follow-up MR on a different FoR does not
@@ -366,17 +367,20 @@ def build_rt_rollup(table: pd.DataFrame) -> pd.DataFrame:
         mr_planning = any(m.frame_of_reference in rt_fors for m in mrs) if rt_fors else bool(mrs)
         if not cts and not mr_planning and status != Status.INCOMPLETE:
             status = _worse(status, Status.WARN); reasons.append("no planning image (CT/MR)")
-            actions.append("récupérer l'image de planification (CT/MR)")
+            actions.append("Add the planning image (CT or MR) to the export")
         if within_study_for_bad:
             status = _worse(status, Status.WARN); reasons.append("inconsistent FrameOfReference within a study")
-            actions.append("vérifier le repère (FrameOfReference)")
+            actions.append("Check these objects belong to the same planning image: their "
+                           "frame of reference differs")
         missing_t = [t for t in TARGET_ROIS if not roi_flags[t]]
         if missing_t and structs:
             status = _worse(status, Status.WARN); reasons.append("missing target(s): " + ", ".join(missing_t))
-            actions.append("contourer la/les cible(s) manquante(s) : " + ", ".join(missing_t))
+            actions.append("Add the target contour(s), or rename them to standard names: "
+                           + ", ".join(missing_t))
         if fragmented:
             reasons.append(f"RT chain spread across {len(rt_studies)} studies (FRAGMENTED)")
-            actions.append("regrouper / vérifier la chaîne RT dispersée")
+            actions.append("Review the chain split across several studies: a re-plan, or a "
+                           "partial export")
 
         rows.append({"patient_id": str(pid), "n_studies": int(n_studies), "n_rt_studies": len(rt_studies),
                      "rt_status": status.value, "fragmented": fragmented,

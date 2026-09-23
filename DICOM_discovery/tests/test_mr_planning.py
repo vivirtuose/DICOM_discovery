@@ -54,7 +54,7 @@ def test_mr_planned_chain_grades_ok_without_ct():
     row = build_rt_rollup(_resolved_chain(planning="MR")).iloc[0]
     assert row["rt_status"] == "OK", f"MR-planned chain should be OK, got {row['rt_status']} ({row['reason']})"
     assert "planning CT" not in row["reason"]
-    assert "CT de planification" not in row["action"]
+    assert "planning image" not in row["action"]  # no "fetch a CT" instruction on an MR plan
 
 
 def test_image_less_chain_still_warns_missing_planning_image():

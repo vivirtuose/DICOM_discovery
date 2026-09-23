@@ -96,7 +96,7 @@ dicom-discovery doctor --root /mnt/dicom --output-dir /srv/qc
 locale encodings and — on Windows — whether long paths (>260 characters) are enabled, then
 probes the share for readability and the output folder for writability. It exits 1 when a
 check fails, so a scheduler can run it as a gate before a 40-minute scan that would write
-nothing. CSV exports carry a UTF-8 BOM so accented verdict actions open correctly in Excel;
+nothing. CSV exports carry a UTF-8 BOM so accented ROI names open correctly in Excel;
 `verdicts.json` stays BOM-free for strict parsers.
 
 ---

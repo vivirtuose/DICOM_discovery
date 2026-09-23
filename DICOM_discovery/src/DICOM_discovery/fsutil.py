@@ -65,9 +65,9 @@ def atomic_write_text(path: PathLike, text: str, encoding: str = "utf-8") -> Non
 def atomic_write_csv(path: PathLike, df) -> None:
     """Write a DataFrame as CSV, atomically, **with a UTF-8 BOM**.
 
-    The verdicts carry French text ("récupérer l'image de planification"). Excel opens a
-    BOM-less UTF-8 CSV with the system codepage (cp1252 on a French Windows) and shows
-    mojibake; the BOM makes it detect UTF-8. pandas/`csv` read it back unchanged
+    Real cohorts carry accented ROI names and paths ("Moelle epiniere", "D:/Donnees/..."):
+    Excel opens a BOM-less UTF-8 CSV with the system codepage (cp1252 on a French Windows)
+    and shows mojibake; the BOM makes it detect UTF-8. pandas/`csv` read it back unchanged
     (``utf-8-sig`` is stripped on read, and utf-8 readers tolerate the marker).
     """
     atomic_write_text(path, df.to_csv(index=False), encoding="utf-8-sig")

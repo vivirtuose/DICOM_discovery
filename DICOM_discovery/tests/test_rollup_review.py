@@ -44,9 +44,10 @@ class TestAction:
         # P007 is missing the PTV target → contour it.
         assert "contour" in _action_for(_rollup(cohort), "P007").lower()
 
-    def test_broken_reference_recommends_checking_the_link(self, cohort):
-        # P003/P004 have an unresolved reference link → verify the link.
-        assert "lien" in _action_for(_rollup(cohort), "P003").lower()
+    def test_broken_reference_recommends_re_exporting_the_chain(self, cohort):
+        # P003/P004 reference an object that is not in the export → re-export the chain.
+        action = _action_for(_rollup(cohort), "P003").lower()
+        assert "re-export" in action and "chain" in action
 
 
 class TestOrderForReview:

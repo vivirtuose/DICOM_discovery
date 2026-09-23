@@ -196,3 +196,41 @@ def test_synthetic_cohort_has_no_spurious_for_inconsistent(cohort):
     df, _idx, _truth = cohort
     flagged = set(df[df["findings"].str.contains("FOR_INCONSISTENT", na=False)]["patient_id"])
     assert flagged <= {"P005"}
+
+
+# --------------------------------------------------------------------------- #
+# The Action column is what a clinician acts on: plain English, one clear step.
+# --------------------------------------------------------------------------- #
+FRENCH_LEFTOVERS = ("vérifier", "récupérer", "contourer", "regrouper", "le(s)", "la/les",
+                    "manquant", "planification")
+
+
+def test_recommended_actions_are_plain_english(cohort):
+    """The actions were written in French and mixed with English reasons. A physician using
+    the package on their own data must read one clear instruction — and plain ASCII keeps it
+    intact in the CSV export whatever Excel's codepage."""
+    _df, idx, _truth = cohort
+    rollup = build_rt_rollup(idx.table)
+    actions = [a for a in rollup["action"] if a]
+
+    assert actions, "the synthetic cohort must produce at least one actionable verdict"
+    for action in actions:
+        assert action.isascii(), f"non-ASCII in action: {action!r}"
+        low = action.lower()
+        for leftover in FRENCH_LEFTOVERS:
+            assert leftover not in low, f"French leftover {leftover!r} in: {action!r}"
+        assert action[0].isupper(), f"an instruction starts with a capital: {action!r}"
+        assert len(action) <= 110, f"too long to read in a table cell: {action!r}"
+
+
+def test_actions_name_the_object_to_fetch(cohort):
+    """'Re-export the missing object(s)' helps nobody: say *which* object is missing."""
+    _df, idx, _truth = cohort
+    rollup = build_rt_rollup(idx.table)
+    incomplete = rollup[rollup["rt_status"] == "INCOMPLETE"]
+
+    assert not incomplete.empty
+    for _, row in incomplete.iterrows():
+        missing = [m for m in ("RTSTRUCT", "RTPLAN", "RTDOSE") if not row[f"has_{m}"]]
+        for modality in missing:
+            assert modality in row["action"], f"{row['patient_id']}: action must name {modality}"

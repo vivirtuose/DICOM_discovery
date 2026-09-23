@@ -4,6 +4,17 @@ All notable changes to **DICOM_discovery**. The package began as a single-instit
 data-curation script and was rebuilt, in council-reviewed increments, into an adaptive
 cohort-QC tool.
 
+## 0.11.1 — the Action column speaks to the clinician (2026-09-23)
+- **Recommended actions are now plain English**, not French, and each names the object it is
+  about: "Re-export RTDOSE from the planning system or PACS" instead of "récupérer le(s)
+  objet(s) manquant(s) sur le PACS". A physician running the package on their own data reads
+  one instruction and knows what to do.
+- The missing-target action also says the names can simply be non-standard ("Add the target
+  contour(s), or rename them to standard names: PTV") — the TG-263 check is substring-based,
+  so a target contoured as "Tumour" reads as missing.
+- Actions are ASCII, so they survive any Excel codepage in the CSV export; a test rejects
+  French leftovers, over-long text and unnamed objects.
+
 ## 0.11.0 — runs on a machine with no Python: standalone binaries + double-click launcher (2026-09-22)
 - **One self-contained executable per OS** (Windows `.exe`, macOS arm64, Linux x86_64), built
   by PyInstaller from `deploy/standalone/dicom-discovery.spec`. It embeds Python, pydicom,

@@ -451,10 +451,10 @@ class TestRegistreReskin:
         assert ">Action<" in html_text, "RT table is missing an Action column header"
 
     def test_recommended_actions_are_rendered(self, rendered_html):
-        # P006 is INCOMPLETE (missing RTDOSE) -> fetch from PACS; P007 misses PTV -> contour.
+        # P006 is INCOMPLETE (missing RTDOSE) -> re-export it; P007 misses PTV -> contour it.
         html_text, _ = rendered_html
-        assert "PACS" in html_text, "PACS retrieval action not surfaced in the report"
-        assert "contourer" in html_text.lower(), "contouring action not surfaced in the report"
+        assert "Re-export RTDOSE" in html_text, "re-export action not surfaced in the report"
+        assert "target contour" in html_text.lower(), "contouring action not surfaced in the report"
 
     def test_verdict_badge_is_not_colour_only(self, rendered_html):
         # WCAG: a verdict must be legible without colour — a per-status shape class,

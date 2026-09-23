@@ -1,6 +1,7 @@
 """Portability: what someone needs on an unknown machine — a version to quote in a bug
 report, an environment check that explains *why* a run will fail, and CSVs that open
-correctly in a French Excel (the verdict reasons carry accents)."""
+correctly in a French Excel (real ROI names and paths carry accents: "Moelle epiniere",
+"D:/Donnees/...")."""
 from __future__ import annotations
 
 import json
@@ -100,8 +101,8 @@ def rt_check_outputs(cohort, tmp_path_factory):
 
 
 def test_csv_opens_in_a_french_excel(rt_check_outputs):
-    """Excel on a French Windows reads a BOM-less UTF-8 CSV as cp1252: the accented actions
-    ("récupérer l'image de planification") turn into mojibake."""
+    """Excel on a French Windows reads a BOM-less UTF-8 CSV as cp1252: accented ROI names
+    and paths from a real cohort ("Moelle épinière") turn into mojibake."""
     rc, per_study, per_patient, _ = rt_check_outputs
     assert rc == 0
     for path in (per_study, per_patient):
