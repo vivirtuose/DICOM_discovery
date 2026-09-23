@@ -73,9 +73,10 @@ def _plural(n: int, word: str) -> str:
 # KPI line
 # --------------------------------------------------------------------------- #
 def _kpi_seg(num, lab: str, title: str, cls: str = "", extra: str = "") -> str:
+    lab_cls = f"kpi-lab {cls}" if cls else "kpi-lab"
     return (f"<div class='kpi ckpi{extra}' title='{_esc(title)}'>"
             f"<span class='kpi-num'>{_esc(num)}</span>"
-            f"<span class='kpi-lab {cls}'>{_esc(lab)}</span></div>")
+            f"<span class='{lab_cls}'>{_esc(lab)}</span></div>")
 
 
 def _kpi_line_html(grid: List[dict], kpis: dict) -> str:
@@ -226,8 +227,7 @@ def _toolbar_html() -> str:
             "<button type='button' class='btn' id='comp-only-missing' aria-pressed='false'>"
             "Only incomplete</button>"
             "<button type='button' class='btn' id='comp-export'>Export CSV</button>"
-            "<span class='hint'>Worst patients first. A blank cell means the protocol "
-            "expects nothing there.</span></div>")
+            "<span class='hint'>Worst patients first; blank = nothing expected.</span></div>")
 
 
 def completeness_section_html(grid: List[dict], kpis: dict, protocol: Protocol) -> str:
@@ -291,7 +291,10 @@ def completeness_styles() -> str:
   max-height:74vh;overflow:auto;background:var(--surface);
   border:1px solid var(--line);border-radius:var(--radius);
 }
-.cgrid{border:none;border-radius:0}
+/* The base .grid rounds its corners with overflow:hidden; that clips position:sticky, so the
+   header row would scroll away at 98 patients. The wrapper owns the border and the radius
+   now, and the table hands its overflow back. */
+.cgrid{border:none;border-radius:0;overflow:visible}
 .cgrid thead th{position:sticky;top:0;z-index:3}
 .cgrid thead th.c-pid{left:0;z-index:4}
 .cgrid th.ctp{font-family:var(--mono);font-size:12px;color:var(--ink);font-weight:600}

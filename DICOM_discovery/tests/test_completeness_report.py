@@ -30,6 +30,7 @@ from DICOM_discovery import (  # noqa: E402
 )
 from DICOM_discovery.report_completeness import (  # noqa: E402
     completeness_section_html,
+    completeness_styles,
 )
 
 # --------------------------------------------------------------------------- #
@@ -397,6 +398,21 @@ def test_rows_carry_the_data_attributes_the_toggle_and_export_need():
     assert "data-tp='M3'" in html_text
     assert "data-mod='MR'" in html_text
     assert "data-state='MISSING'" in html_text
+
+
+def test_grid_table_reclaims_overflow_so_the_sticky_header_survives():
+    """The base .grid rounds its corners with overflow:hidden, which kills position:sticky.
+
+    Caught in the browser at 98 patients: the column labels scrolled away because an
+    ancestor with overflow:hidden clips a sticky child. Fails if the .cgrid override is
+    dropped and the header stops following the reader down the cohort.
+    """
+    css = completeness_styles()
+    assert re.search(r"\.cgrid\{[^}]*overflow:visible", css), (
+        "the completeness table does not hand its overflow back to the scroll wrapper"
+    )
+    assert re.search(r"\.cgrid thead th\{[^}]*position:sticky", css)
+    assert re.search(r"\.cgrid-scroll\{[^}]*overflow:auto", css)
 
 
 def test_empty_grid_renders_a_note_instead_of_an_empty_table():
