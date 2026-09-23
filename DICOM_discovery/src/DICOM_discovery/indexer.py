@@ -113,6 +113,11 @@ TABLE_COLUMNS = [
     "sop_class_uid", "sop_instance_uid", "frame_of_reference",
     "roi_names", "ref_struct_uids", "ref_plan_uids",
     "dose_units", "dose_sum_type", "n_fractions",
+    # How many DICOM files collapsed into this row. An image series becomes ONE row (see the
+    # collapse loop in `index_tree`), so without this the table can no longer say how many
+    # files a cohort actually holds — a 200-slice CT and a single-slice localiser both read as
+    # "1". RT objects carry no series UID and are never collapsed, so theirs is always 1.
+    "n_instances",
 ]
 
 
@@ -481,7 +486,11 @@ def build_index(root: str, patient_regexes: Optional[List[str]] = None,
     # the size of the collapsed table, not of the ~1M per-slice records.
     no_series: List[dict] = []
     by_series: List[dict] = []
-    seen_series = set()
+    # (patient, series) -> the one record kept for that series. The values are references to
+    # records already appended to ``by_series``, not copies, so counting costs a dict of keys
+    # rather than a second table. It replaces the plain "seen" set: skipping a duplicate slice
+    # now increments the kept row instead of discarding the fact that the slice existed.
+    series_row: Dict[Tuple[str, str], dict] = {}
     for fp in all_paths:
         raw = raw_by_path.get(fp)
         if raw is None:
@@ -492,13 +501,19 @@ def build_index(root: str, patient_regexes: Optional[List[str]] = None,
             pid, pid_source = _resolve_patient(raw, root_path, patterns)
         series_uid = str(raw["series_uid"])
         if series_uid:
-            if (pid, series_uid) in seen_series:
+            kept = series_row.get((pid, series_uid))
+            if kept is not None:
+                kept["n_instances"] += 1
                 continue
-            seen_series.add((pid, series_uid))
         rec = dict(raw)
         rec["source_root"] = str(root_path)
         rec["patient_id"], rec["patient_id_source"] = pid, pid_source
-        (by_series if series_uid else no_series).append(rec)
+        rec["n_instances"] = 1
+        if series_uid:
+            series_row[(pid, series_uid)] = rec
+            by_series.append(rec)
+        else:
+            no_series.append(rec)
 
     df = pd.DataFrame(no_series + by_series, columns=TABLE_COLUMNS)
 
@@ -509,7 +524,11 @@ def build_index(root: str, patient_regexes: Optional[List[str]] = None,
         "group_by": group_by,
         "patient_regexes": list(patient_regexes or []),
         "n_files_seen": n_files,
+        # Rows, i.e. series and standalone RT objects — NOT files, because image series are
+        # collapsed. ``n_dicom_files`` is the file count the rows stand for; the two differ by
+        # roughly the mean slice count and must never be presented under one label.
         "n_dicom_indexed": int(len(df)),
+        "n_dicom_files": int(df["n_instances"].sum()) if not df.empty else 0,
         "n_unreadable": len(unreadable),
         "n_dirs_excluded": walk.n_dirs_excluded,
         "exclude_dirs": list(exclude_dirs or []),

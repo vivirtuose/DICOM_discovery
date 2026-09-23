@@ -213,3 +213,36 @@ def test_incremental_checkpoint_flushes_during_scan(tmp_path):
     # The checkpointed cache must be valid and reusable.
     again = build_index(str(cohort), cache=str(cache))
     assert again.manifest["n_dicom_indexed"] == idx.manifest["n_dicom_indexed"]
+
+
+def test_collapsed_series_still_counts_its_files(tmp_path):
+    """A collapsed image series must remember how many files it stood for.
+
+    ``build_index`` keeps ONE row per (patient, series) so a 200-slice CT does not put 200
+    rows in the table. That collapse used to discard the slice count entirely, which left the
+    cohort unable to answer "how many DICOM files are in here?" — a 200-slice CT and a
+    single-slice localiser both read as one. ``n_instances`` is that count, and the manifest
+    reports the two numbers under two names because they are two different facts.
+    """
+    generate_synthetic_cohort(str(tmp_path))
+    before = build_index(str(tmp_path))
+    ct = before.table[before.table["modality"] == "CT"].iloc[0]
+    n_rows_before, n_files_before = len(before.table), int(before.table["n_instances"].sum())
+
+    # Three more slices of the SAME series: same SeriesInstanceUID, new file names.
+    src = Path(ct["path"])
+    for i in range(3):
+        (src.parent / f"slice_{i}.dcm").write_bytes(src.read_bytes())
+
+    after = build_index(str(tmp_path))
+    assert len(after.table) == n_rows_before, "the extra slices must not add rows"
+    assert int(after.table["n_instances"].sum()) == n_files_before + 3
+
+    row = after.table[after.table["series_uid"] == ct["series_uid"]]
+    assert len(row) == 1
+    assert int(row.iloc[0]["n_instances"]) == int(ct["n_instances"]) + 3
+
+    # The manifest must not let the two be read as one number.
+    assert after.manifest["n_dicom_indexed"] == n_rows_before
+    assert after.manifest["n_dicom_files"] == n_files_before + 3
+    assert after.manifest["n_dicom_files"] > after.manifest["n_dicom_indexed"]
