@@ -537,23 +537,56 @@ class TestCompletenessTab:
         for tp in DEFAULT_PROTOCOL.timepoints:
             assert f">{tp}</b>" in html_text, f"timepoint {tp} missing from the protocol line"
 
-    def test_completeness_chips_are_not_colour_only(self, rendered_html):
-        """Same WCAG guarantee as the RT verdict pills, inside the report.
+    def test_every_completeness_chip_is_labelled_with_its_own_state(self, rendered_html):
+        """Every chip, not merely one of them, must name its own state accessibly.
 
-        Fails if the chips lose their aria-labels when embedded in the cohort report.
+        An "any chip has a label" check passes when a single chip anywhere in a 12-patient
+        report keeps its aria-label. This counts the chips, requires the count of accessible
+        labels to match exactly, and checks each label against that chip's own data
+        attributes — so one unlabelled or mislabelled state branch fails.
+        """
+        import re
+        html_text, _ = rendered_html
+        chips = re.findall(r"<span class='chip chip-[A-Z]+'[^>]*>", html_text)
+        assert chips, "no completeness chips rendered in the report"
+        assert len(chips) == html_text.count("class='chip "), "a chip is missing its state class"
+        words = {"PRESENT": "present", "MISSING": "missing",
+                 "EXTRA": "extra", "UNMAPPED": "unmapped"}
+        labelled = 0
+        for chip in chips:
+            tp = re.search(r"data-tp='([^']*)'", chip).group(1)
+            mod = re.search(r"data-mod='([^']*)'", chip).group(1)
+            state = re.search(r"data-state='([^']*)'", chip).group(1)
+            assert f"aria-label='{tp} {mod} {words[state]}'" in chip, (
+                f"chip labelled inconsistently with its own state: {chip}"
+            )
+            labelled += 1
+        assert labelled == len(chips)
+
+    def test_no_completeness_cell_carries_a_state_outside_the_four_valid_ones(self, rendered_html):
+        """Only PRESENT / MISSING / EXTRA / UNMAPPED may reach the page.
+
+        Stronger than pinning the old ``chip-NA`` class name: a grey "not expected" cell
+        reintroduced under any other name would pass that check and fails this one, because
+        the requirement is that a fifth state does not exist, not that one spelling is gone.
+        """
+        import re
+        html_text, _ = rendered_html
+        states = set(re.findall(r"data-state='([^']*)'", html_text))
+        assert states, "no completeness cell states rendered"
+        assert states <= {"PRESENT", "MISSING", "EXTRA", "UNMAPPED"}, f"unexpected: {states}"
+
+    def test_report_stylesheet_places_the_completeness_rules_after_the_base_rules(self, rendered_html):
+        """Source order decides two overrides that tie on specificity — assert it on the page.
+
+        `.cgrid{overflow:visible}` must follow `.grid{overflow:hidden}` (sticky header) and
+        `.sw-blank{border-style:dashed}` must follow `.sw{border:...}` (blank swatch).
+        Swapping the two style() calls in render_cohort_report reinstates both bugs.
         """
         html_text, _ = rendered_html
-        assert "aria-label='baseline" in html_text or "aria-label='M3" in html_text, (
-            "completeness chips carry no accessible state label"
-        )
-
-    def test_report_has_no_grey_not_expected_cells(self, rendered_html):
-        """No NA chip may appear anywhere in the report.
-
-        Fails if the 'not expected' grey box comes back through the cohort report.
-        """
-        html_text, _ = rendered_html
-        assert "chip-NA" not in html_text
+        css = html_text.split("<style>", 1)[1].split("</style>", 1)[0]
+        assert css.index(".cgrid{") > css.index(".grid{")
+        assert css.index(".sw-blank{") > css.index(".sw{")
 
 
 class TestKpiFilterChips:

@@ -281,9 +281,12 @@ def completeness_styles() -> str:
 .protocol-line .pwin{font-family:var(--mono);font-size:11px;color:var(--dim)}
 .protocol-line .pmods{font-family:var(--mono);font-size:11px;color:var(--muted)}
 
-/* ---- legend ---- */
+/* ---- legend ----
+   No `.clegend .sw` rule here: a descendant selector (0,2,0) would out-specify every
+   `.sw-*` variant below (0,1,0) and silently repaint all five swatches the same grey. The
+   base `.sw` already supplies the border; the variants only need to tie with it and come
+   later in the stylesheet, which is why the page emits the base CSS first. */
 .clegend{color:var(--muted)}
-.clegend .sw{border:1px solid var(--line-strong)}
 .sw-blank{background:transparent;border-style:dashed}
 
 /* ---- the grid: sticky header + sticky patient column, compact rows ---- */
@@ -347,6 +350,35 @@ def completeness_styles() -> str:
 """
 
 
+def _csv_rows_js() -> str:
+    """The pure, DOM-free half of the CSV export, kept separate so it can be run in a test.
+
+    Everything that decides *what lands in the file* lives here and takes plain data; the
+    click handler only walks the DOM to build that data. Splitting the two is what makes the
+    "a patient must never silently vanish from the export" rule testable rather than asserted
+    by reading the source.
+    """
+    return r"""
+  function compCsvRows(entries){
+    var rows = [['patient','timepoint','modality','state']];
+    entries.forEach(function(e){
+      // A patient with no chip at all is not a patient with no data: it is a patient the
+      // protocol expects nothing of. Walking only the chips dropped them from the file
+      // entirely, so a reader reconciling the CSV against the cohort would conclude they do
+      // not exist. They get one row that says exactly what is true about them.
+      if(!e.chips || !e.chips.length){
+        rows.push([e.patient, '', '', 'nothing expected']);
+        return;
+      }
+      e.chips.forEach(function(c){
+        rows.push([e.patient, c.timepoint, c.modality, c.state]);
+      });
+    });
+    return rows;
+  }
+"""
+
+
 def completeness_script() -> str:
     """Vanilla JS for the grid: patient filter, only-incomplete toggle, CSV export.
 
@@ -356,6 +388,7 @@ def completeness_script() -> str:
     return r"""
 (function(){
   "use strict";
+""" + _csv_rows_js() + r"""
   var grid = document.getElementById('comp-grid');
   if(!grid) return;
   var cState = {q:'', onlyMissing:false};
@@ -385,17 +418,21 @@ def completeness_script() -> str:
   var cExport = document.getElementById('comp-export');
   if(cExport){
     cExport.addEventListener('click', function(){
-      // One CSV row per chip: patient, timepoint, modality, state. Read from the chips' data
-      // attributes rather than their text, so the glyphs never reach the file.
-      var rows = [['patient','timepoint','modality','state']];
+      // Walk the DOM into plain data, then let compCsvRows decide what lands in the file.
+      // Values come from the chips' data attributes, not their text, so the glyphs and the
+      // screen-reader words never reach the CSV.
+      var entries = [];
       grid.querySelectorAll('tbody tr.crow').forEach(function(tr){
         if(tr.hidden) return;
-        var pid = tr.getAttribute('data-pid') || '';
+        var chips = [];
         tr.querySelectorAll('.chip').forEach(function(c){
-          rows.push([pid, c.getAttribute('data-tp') || '',
-                     c.getAttribute('data-mod') || '', c.getAttribute('data-state') || '']);
+          chips.push({timepoint: c.getAttribute('data-tp') || '',
+                      modality: c.getAttribute('data-mod') || '',
+                      state: c.getAttribute('data-state') || ''});
         });
+        entries.push({patient: tr.getAttribute('data-pid') || '', chips: chips});
       });
+      var rows = compCsvRows(entries);
       var csv = rows.map(function(r){
         return r.map(function(c){ return '"' + String(c).replace(/"/g,'""') + '"'; }).join(',');
       }).join('\n');

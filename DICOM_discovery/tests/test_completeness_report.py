@@ -10,7 +10,10 @@ cohort, so a rendering regression is not masked by a change in the synthetic dat
 """
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -29,6 +32,8 @@ from DICOM_discovery import (  # noqa: E402
     render_completeness_map,
 )
 from DICOM_discovery.report_completeness import (  # noqa: E402
+    _csv_rows_js,
+    completeness_script,
     completeness_section_html,
     completeness_styles,
 )
@@ -109,9 +114,26 @@ def test_a_timepoint_with_nothing_expected_renders_no_chip():
     html_text = completeness_section_html(grid, _kpis(n_patients=1), TINY_PROTOCOL)
 
     assert len(_chips(html_text)) == 2, "an empty cell rendered a chip"
-    assert "chip-NA" not in html_text
     # The empty cell is still a cell (column alignment survives) but carries no ink.
     assert "<td class='ccell empty'></td>" in html_text
+
+
+def test_no_cell_carries_a_state_outside_the_four_actionable_ones():
+    """Every rendered state must be one of PRESENT / MISSING / EXTRA / UNMAPPED.
+
+    Stronger than pinning the old ``chip-NA`` class name: a grey "not expected" cell
+    reintroduced under any other name (NONE, NA2, SKIPPED) fails this, because the whole
+    point is that a fifth state must not exist at all, whatever it is called.
+    """
+    grid = [_patient("A", [
+        _cell("baseline", [("CT", "PRESENT"), ("PT", "EXTRA")]),
+        _cell("M3", []),
+        _cell("M12", [("MR", "MISSING")]),
+    ], n_expected=2, n_present=1)]
+    html_text = completeness_section_html(grid, _kpis(n_patients=1), TINY_PROTOCOL)
+    states = set(re.findall(r"data-state='([^']*)'", html_text))
+    assert states, "no cell states rendered at all"
+    assert states <= {"PRESENT", "MISSING", "EXTRA", "UNMAPPED"}, f"unexpected states: {states}"
 
 
 def test_no_not_expected_legend_entry_survives():
@@ -182,10 +204,12 @@ def test_every_chip_states_its_status_in_text_and_aria_label(state, word):
     assert ">MR<" in chip, "modality label missing from the chip"
 
 
-def test_every_chip_in_the_real_cohort_has_an_aria_label(longitudinal):
-    """Not one chip may slip through without an accessible state label.
+def test_every_chip_in_the_real_cohort_is_labelled_with_its_own_state(longitudinal):
+    """Each chip's aria-label must read '<timepoint> <modality> <word>' for *its* state.
 
-    Fails if a state branch of the chip renderer forgets its aria-label.
+    Asserting only that the attribute exists would pass a renderer that labelled every chip
+    "baseline CT present"; this pins each label against that chip's own data attributes, so
+    a mislabelled or copy-pasted branch fails.
     """
     _root, idx = longitudinal
     _state, _hover, long_df = build_completeness(idx.table, DEFAULT_PROTOCOL)
@@ -193,7 +217,15 @@ def test_every_chip_in_the_real_cohort_has_an_aria_label(longitudinal):
                                           completeness_kpis(long_df), DEFAULT_PROTOCOL)
     chips = _chips(html_text)
     assert chips, "no chips rendered for the real cohort"
-    assert all("aria-label='" in c for c in chips)
+    words = {"PRESENT": "present", "MISSING": "missing",
+             "EXTRA": "extra", "UNMAPPED": "unmapped"}
+    for chip in chips:
+        tp = re.search(r"data-tp='([^']*)'", chip).group(1)
+        mod = re.search(r"data-mod='([^']*)'", chip).group(1)
+        state = re.search(r"data-state='([^']*)'", chip).group(1)
+        assert f"aria-label='{tp} {mod} {words[state]}'" in chip, (
+            f"chip labelled inconsistently with its own state: {chip}"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -400,6 +432,82 @@ def test_rows_carry_the_data_attributes_the_toggle_and_export_need():
     assert "data-state='MISSING'" in html_text
 
 
+def _run_js(source, tmp_path):
+    """Execute a self-contained JS snippet under node and return its JSON stdout."""
+    script = tmp_path / "snippet.js"
+    script.write_text(source, encoding="utf-8")
+    proc = subprocess.run([shutil.which("node"), str(script)],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout.strip())
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node unavailable for JS execution")
+def test_csv_export_keeps_a_patient_that_has_no_chips(tmp_path):
+    """A patient the protocol expects nothing of must still get a CSV row, never vanish.
+
+    The export walks the chips, and a "nothing expected" patient has none — so it silently
+    dropped them from the file. A patient absent from an export is a data-integrity defect:
+    a reader reconciling the CSV against the cohort would conclude the patient does not
+    exist. Fails if the chipless branch is removed or renamed; runs the real export logic,
+    so it cannot be satisfied by a comment.
+    """
+    rows = _run_js(_csv_rows_js() + """
+      console.log(JSON.stringify(compCsvRows([
+        {patient:'L004', chips:[{timepoint:'M6', modality:'MR', state:'MISSING'}]},
+        {patient:'L098', chips:[]}
+      ])));
+    """, tmp_path)
+    assert rows[0] == ["patient", "timepoint", "modality", "state"]
+    assert ["L004", "M6", "MR", "MISSING"] in rows
+    assert ["L098", "", "", "nothing expected"] in rows
+    assert len(rows) == 3, f"expected header + two patients, got {rows}"
+
+
+def test_the_export_handler_routes_through_the_shared_row_builder():
+    """The DOM walk must call compCsvRows, not rebuild the rows itself.
+
+    Fails if the click handler ever grows its own inline row loop again, which is how the
+    chipless patient was dropped in the first place.
+    """
+    script = completeness_script()
+    assert "compCsvRows(" in script
+    assert script.count("function compCsvRows") == 1
+
+
+def _css_rules(css):
+    """(selector, declarations) for every rule in a flat stylesheet."""
+    out = []
+    for block in css.split("}"):
+        if "{" not in block:
+            continue
+        sel, body = block.rsplit("{", 1)
+        out.append((sel.strip().splitlines()[-1].strip(), body))
+    return out
+
+
+def test_no_legend_rule_outranks_the_swatch_variants():
+    """A compound selector such as `.clegend .sw` (0,2,0) silently beats `.sw-blank` (0,1,0).
+
+    That is exactly what shipped: the blank swatch rendered solid instead of dashed and all
+    four state swatches took the same grey border, because a redundant descendant rule
+    out-specified every variant. Fails if any border-declaring rule that matches a legend
+    swatch carries more class selectors than the `.sw-*` variants it must not override.
+    """
+    variants = [s for s, _b in _css_rules(completeness_styles()) if s.startswith(".sw-")]
+    assert variants, "no swatch variant rules found"
+    max_variant = max(s.count(".") for s in variants)
+    for sel, body in _css_rules(completeness_styles()):
+        if "border" not in body:
+            continue
+        for part in (p.strip() for p in sel.split(",")):
+            if ".sw" not in part:
+                continue
+            assert part.count(".") <= max_variant, (
+                f"{part!r} out-specifies the .sw-* variants and silently overrides them"
+            )
+
+
 def test_grid_table_reclaims_overflow_so_the_sticky_header_survives():
     """The base .grid rounds its corners with overflow:hidden, which kills position:sticky.
 
@@ -482,6 +590,21 @@ def test_standalone_page_keeps_the_research_use_only_banner(standalone_page):
     """
     html_text, _ = standalone_page
     assert html_text.count("Research Use Only") >= 2
+
+
+def test_page_stylesheet_places_the_completeness_rules_after_the_base_rules(standalone_page):
+    """Two overrides tie on specificity with the base rules, so *source order* decides them.
+
+    `.cgrid{overflow:visible}` has to beat `.grid{overflow:hidden}` (or the sticky header dies)
+    and `.sw-blank{border-style:dashed}` has to beat `.sw{border:...}` (or the blank swatch is
+    solid). Both are 0,1,0 against 0,1,0. Swapping the two stylesheet calls in the page
+    template reinstates both bugs while every isolated-CSS test still passes, so the order is
+    asserted on the rendered page itself.
+    """
+    html_text, _ = standalone_page
+    css = html_text.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert css.index(".cgrid{") > css.index(".grid{"), "completeness CSS emitted before the base CSS"
+    assert css.index(".sw-blank{") > css.index(".sw{"), "swatch variants emitted before the base .sw"
 
 
 def test_standalone_page_has_a_single_stylesheet_and_a_sticky_header(standalone_page):
