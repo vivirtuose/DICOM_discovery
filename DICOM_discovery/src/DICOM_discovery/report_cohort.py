@@ -45,6 +45,7 @@ from .report_completeness import (
     completeness_section_html,
     completeness_styles,
 )
+from .report_overview import cohort_overview, overview_section_html, overview_styles
 from .rt_integrity import order_for_review
 
 try:
@@ -1003,17 +1004,25 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
     comp_gaps = completeness_gaps(comp_long)
     comp_section = completeness_section_html(comp_grid, comp_kpis, protocol, comp_gaps)
 
+    # The overview opens the report. A reader who lands on a work queue has no way to check
+    # that the queue is about the cohort they meant; this tab answers that first, and grades
+    # nothing. It borrows the unplaceable-patient count from comp_long rather than deriving
+    # its own, so the front page and the completeness tab cannot disagree about it.
+    overview = cohort_overview(table, manifest, comp_long)
+
     page = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_esc(title)}</title>
-<style>{_styles()}{completeness_styles()}</style>
+<style>{_styles()}{completeness_styles()}{overview_styles()}</style>
 </head><body>
 {_topbar_html(manifest)}
 <main>
   {_kpi_html(kpis)}
   <div class="tabs" role="tablist" aria-label="report sections">
-    <button class="tab" role="tab" data-tab="rt" aria-selected="true">
+    <button class="tab" role="tab" data-tab="overview" aria-selected="true">
+      Overview</button>
+    <button class="tab" role="tab" data-tab="rt" aria-selected="false">
       RT integrity<span class="count">{n_rt}</span></button>
     <button class="tab" role="tab" data-tab="map" aria-selected="false">
       Cohort map</button>
@@ -1021,7 +1030,11 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
       Completeness<span class="count">{comp_kpis["n_patients"]}</span></button>
   </div>
 
-  <section class="panel" role="tabpanel" data-panel="rt">
+  <section class="panel" role="tabpanel" data-panel="overview">
+    {overview_section_html(overview)}
+  </section>
+
+  <section class="panel" role="tabpanel" data-panel="rt" hidden>
     {_rt_table_html(rt_rows, findings)}
   </section>
 
