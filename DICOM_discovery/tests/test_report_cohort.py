@@ -379,19 +379,20 @@ class TestRenderCohortReport:
             f"HTML too small ({len(html_text)} bytes) — Plotly.js probably not embedded inline"
         )
 
-    def test_render_both_tabs_present(self, rendered_html):
-        """The two tabs — RT integrity and Cohort map — must appear in the markup.
+    def test_render_three_tabs_present(self, rendered_html):
+        """RT integrity, Cohort map and Completeness must all appear in the markup.
 
-        The completeness map/tab was removed by design; only these two remain.
+        The old Plotly completeness tab was removed in v0.7; v0.12 brings completeness back
+        as a readable grid. Fails if the third tab (button or panel) is not wired up.
         """
         html_text, _ = rendered_html
         assert 'data-tab="rt"' in html_text, "RT integrity tab not found in HTML"
         assert 'data-tab="map"' in html_text, "Cohort map tab not found in HTML"
+        assert 'data-tab="comp"' in html_text, "Completeness tab not found in HTML"
         assert "RT integrity" in html_text, "RT integrity tab label missing"
         assert "Cohort map" in html_text, "Cohort map tab label missing"
-        # The completeness tab/panel were removed.
-        assert 'data-tab="comp"' not in html_text, "Completeness tab should be gone"
-        assert 'id="comp-table"' not in html_text, "Completeness table should be gone"
+        assert "Completeness" in html_text, "Completeness tab label missing"
+        assert 'data-panel="comp"' in html_text, "Completeness panel not found in HTML"
 
     def test_render_kpi_cards_present(self, rendered_html):
         """KPI section must contain OK/WARN/INCOMPLETE/NO_RT verdict labels + cohort complete."""
@@ -502,6 +503,57 @@ class TestCohortMap:
         # Modalities appear as legend entries (trace names) in the embedded figure JSON.
         html_text, _ = rendered_html
         assert '"CT"' in html_text and '"MR"' in html_text, "modality legend entries missing"
+
+
+class TestCompletenessTab:
+    """The third tab: the completeness grid, rendered by the shared
+    ``report_completeness.completeness_section_html`` — same markup as the standalone page."""
+
+    def test_panel_holds_the_shared_completeness_grid(self, rendered_html):
+        """The panel must contain the shared grid, not a tab-only variant.
+
+        Fails if the cohort report grows its own second completeness renderer.
+        """
+        html_text, _ = rendered_html
+        assert "id='comp-grid'" in html_text, "completeness grid table missing from the report"
+        assert "<tr class='crow'" in html_text, "no patient rows in the completeness grid"
+
+    def test_panel_has_the_same_toolbar_controls_as_the_rt_table(self, rendered_html):
+        """Filter box, only-incomplete toggle and Export CSV, exactly like the RT table.
+
+        Fails if the tab ships a read-only grid with no interactions.
+        """
+        html_text, _ = rendered_html
+        for control in ("id='comp-filter'", "id='comp-only-missing'", "id='comp-export'"):
+            assert control in html_text, f"completeness control {control} missing"
+
+    def test_panel_explains_what_the_protocol_expects(self, rendered_html):
+        """The protocol line must justify 'expected' inside the report too.
+
+        Fails if the protocol line is rendered only on the standalone page.
+        """
+        html_text, _ = rendered_html
+        assert f"Protocol {DEFAULT_PROTOCOL.name}" in html_text
+        for tp in DEFAULT_PROTOCOL.timepoints:
+            assert f">{tp}</b>" in html_text, f"timepoint {tp} missing from the protocol line"
+
+    def test_completeness_chips_are_not_colour_only(self, rendered_html):
+        """Same WCAG guarantee as the RT verdict pills, inside the report.
+
+        Fails if the chips lose their aria-labels when embedded in the cohort report.
+        """
+        html_text, _ = rendered_html
+        assert "aria-label='baseline" in html_text or "aria-label='M3" in html_text, (
+            "completeness chips carry no accessible state label"
+        )
+
+    def test_report_has_no_grey_not_expected_cells(self, rendered_html):
+        """No NA chip may appear anywhere in the report.
+
+        Fails if the 'not expected' grey box comes back through the cohort report.
+        """
+        html_text, _ = rendered_html
+        assert "chip-NA" not in html_text
 
 
 class TestKpiFilterChips:
