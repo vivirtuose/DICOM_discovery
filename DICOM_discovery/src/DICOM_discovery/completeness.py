@@ -294,24 +294,16 @@ def completeness_kpis(long_df: pd.DataFrame) -> dict:
     n_unmapped = sum(1 for p in grid for c in p["cells"] if c["state"] == "UNMAPPED")
     pct_complete_mean = round(sum(p["pct_complete"] for p in grid) / n_patients, 1)
 
-    # Protocol order for the tie-break comes from any one patient's cells: build_completeness
-    # gives every patient the same timepoint sequence, so the first patient's order will do.
-    tp_order = {tp: i for i, tp in enumerate(c["timepoint"] for c in grid[0]["cells"])}
-
-    gap_counts: Dict[Tuple[str, str], int] = {}
-    for p in grid:
-        for cell in p["cells"]:
-            for item in cell["items"]:
-                if item["state"] == "MISSING":
-                    key = (cell["timepoint"], item["modality"])
-                    gap_counts[key] = gap_counts.get(key, 0) + 1
-
+    # The worst gap is the first row of the gap table, by definition — so take it from there
+    # rather than counting a second time. The counting loop this replaces incremented once per
+    # MISSING *item* while completeness_gaps counts distinct *patients*, so a long_df holding
+    # the same (patient, timepoint, modality) twice made one page print "most-missed in 2
+    # patients" above a table whose own column said 1. Two definitions of one word is how that
+    # happens; there is now one, and the tie-break rules live with it.
+    gaps = completeness_gaps(long_df)
     worst_gap: Optional[dict] = None
-    if gap_counts:
-        worst_count = max(gap_counts.values())
-        tied = [k for k, v in gap_counts.items() if v == worst_count]
-        tp, mod = min(tied, key=lambda k: (tp_order.get(k[0], len(tp_order)), k[1]))
-        worst_gap = {"timepoint": tp, "modality": mod, "n_patients": worst_count}
+    if gaps:
+        worst_gap = {key: gaps[0][key] for key in ("timepoint", "modality", "n_patients")}
 
     return {"n_patients": n_patients, "n_complete": n_complete,
             "n_incomplete": n_patients - n_complete, "pct_complete_mean": pct_complete_mean,

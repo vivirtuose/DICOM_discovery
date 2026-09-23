@@ -414,3 +414,24 @@ def test_completeness_gaps_agree_with_the_grid_on_the_real_cohort(longitudinal):
     from_gaps = {(g["timepoint"], g["modality"], pid)
                  for g in completeness_gaps(long_df) for pid in g["patients"]}
     assert from_grid == from_gaps
+
+
+def test_worst_gap_and_the_gap_table_agree_on_a_duplicated_missing_row():
+    """The KPI line and the gap table must never print two counts for the same gap.
+
+    ``completeness_gaps`` deduplicates patients through a set; ``worst_gap`` used to
+    increment once per MISSING *item*. On a long_df carrying the same (patient, timepoint,
+    modality) twice the page said "most-missed in 2 patients" above a table whose own column
+    said 1 — and a QC tool that contradicts itself on one number is not trusted on any of
+    them. Would fail again the moment the two stop sharing a single definition of a gap.
+    """
+    long_df = _long([
+        ["A", "M6", "MR", True, False, "MISSING"],
+        ["A", "M6", "MR", True, False, "MISSING"],
+    ])
+    gaps, kpis = completeness_gaps(long_df), completeness_kpis(long_df)
+    assert gaps[0]["n_patients"] == 1
+    assert kpis["worst_gap"]["n_patients"] == gaps[0]["n_patients"]
+    assert kpis["worst_gap"] == {"timepoint": gaps[0]["timepoint"],
+                                 "modality": gaps[0]["modality"],
+                                 "n_patients": gaps[0]["n_patients"]}
