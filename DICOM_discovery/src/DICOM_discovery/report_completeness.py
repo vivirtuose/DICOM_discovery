@@ -181,8 +181,12 @@ def _protocol_line_html(protocol: Protocol) -> str:
             f"<span class='pwin'>day {int(offset)} +/-{int(protocol.tolerance_days)}</span> "
             f"<span class='pmods'>{_esc(mods)}</span></span>"
         )
+    # The separator is a real character, not CSS margin. Margin exists only on screen: copied
+    # text, a screen reader and a printed page all ran the last modality of one timepoint into
+    # the name of the next ("...RTDOSEM3 day 90..."), which reads as a modality called RTDOSEM3.
+    sep = "<span class='psep'> &middot; </span>"
     return (f"<p class='protocol-line'>Protocol {_esc(protocol.name)} - expected at each "
-            f"timepoint: {''.join(parts)}</p>")
+            f"timepoint: {sep.join(parts)}</p>")
 
 
 # --------------------------------------------------------------------------- #
@@ -269,6 +273,8 @@ def _row_html(patient: dict, timepoints: List[str]) -> str:
         chips = "".join(_chip_html(tp, str(it["modality"]), str(it["state"])) for it in items)
         tds.append(f"<td class='ccell' data-tp='{_esc(tp)}'>{chips}</td>")
 
+    # See _grid_html: the slack column keeps the timepoint columns at content width.
+    tds.append("<td class='cslack'></td>")
     return (f"<tr class='crow' data-pid='{_esc(pid)}' data-missing='{n_missing}' "
             f"data-expected='{n_expected}' data-filter='{_esc(pid.lower())}'>"
             f"<th class='cc-pid' scope='row'><span class='mono pid'>{_esc(pid)}</span>"
@@ -276,10 +282,21 @@ def _row_html(patient: dict, timepoints: List[str]) -> str:
 
 
 def _grid_html(grid: List[dict], protocol: Protocol) -> str:
+    """The per-patient drill-down.
+
+    The trailing ``cslack`` column is load-bearing, not decoration. ``.grid`` is ``width:100%``
+    and this protocol has one wide timepoint (baseline, five modalities) against three narrow
+    ones (a single MR each): the browser handed each narrow column a third of ~740 leftover
+    pixels, so three chips sat marooned in half a page of white. The slack column takes
+    ``width:100%`` and absorbs that leftover, letting the real columns size to their content
+    while the table still spans its box. It holds nothing and carries no chip, so the CSV
+    export (which walks ``.chip``) never sees it.
+    """
     heads = "".join(f"<th class='ctp' scope='col'>{_esc(tp)}</th>" for tp in protocol.timepoints)
     rows = "".join(_row_html(p, list(protocol.timepoints)) for p in grid)
     return (f"<div class='cgrid-scroll'><table class='grid cgrid' id='comp-grid'>"
-            f"<thead><tr><th class='cc-pid' scope='col'>Patient</th>{heads}</tr></thead>"
+            f"<thead><tr><th class='cc-pid' scope='col'>Patient</th>{heads}"
+            f"<th class='cslack'></th></tr></thead>"
             f"<tbody>{rows}</tbody></table></div>")
 
 
@@ -392,7 +409,8 @@ def completeness_styles() -> str:
   border:1px solid var(--line);border-left:3px solid var(--accent-line);
   border-radius:var(--radius-sm);
 }
-.protocol-line .ptp{white-space:nowrap;margin-right:16px}
+.protocol-line .ptp{white-space:nowrap}
+.protocol-line .psep{color:var(--line-strong);padding:0 9px}
 .protocol-line .ptp b{color:var(--ink);font-weight:600}
 .protocol-line .pwin{font-family:var(--mono);font-size:11px;color:var(--dim)}
 .protocol-line .pmods{font-family:var(--mono);font-size:11px;color:var(--muted)}
@@ -469,6 +487,8 @@ def completeness_styles() -> str:
 }
 .ccell{white-space:nowrap}
 .ccell.empty{background:none}
+/* Takes every leftover pixel so the timepoint columns stay at content width — see _grid_html. */
+.cgrid .cslack{width:100%;padding:0;border-bottom:1px solid var(--line)}
 
 /* ---- the chip: modality + glyph, never colour alone ---- */
 .chip{
