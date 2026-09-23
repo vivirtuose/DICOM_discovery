@@ -270,12 +270,20 @@ def test_completeness_kpis_empty_long_df_returns_zeros_without_raising():
 
 
 def test_render_map_is_self_contained(longitudinal, tmp_path):
+    """The standalone page must open air-gapped and carry the four actionable states.
+
+    v0.12 replaced the embedded Plotly heatmap with a plain HTML grid, so the old
+    "Plotly is embedded, page > 1 MB" assertions were inverted rather than dropped: the
+    guarantee is still 'nothing is fetched at view time', now proven by the absence of any
+    external reference *and* of any bundled library. Would fail if a CDN reference, a
+    chart bundle, or one of the state labels came back.
+    """
     _root, idx = longitudinal
     state_df, hover_df, long_df = build_completeness(idx.table, DEFAULT_PROTOCOL)
     out = render_completeness_map(state_df, hover_df, long_df,
                                   str(tmp_path / "map.html"), DEFAULT_PROTOCOL)
     page = Path(out).read_text(encoding="utf-8")
-    assert "Plotly" in page
-    assert len(page) > 1_000_000
-    assert 'src="https://cdn.plot.ly' not in page
+    assert "plotly" not in page.lower()
+    assert "<script src=" not in page and "<link href=" not in page
+    assert "https://" not in page
     assert "MISSING" in page and "PRESENT" in page and "UNMAPPED" in page
