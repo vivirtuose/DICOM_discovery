@@ -325,16 +325,21 @@ def rendered_html(cohort, longitudinal, tmp_path_factory):
     """
     from DICOM_discovery.report_cohort import render_cohort_report  # noqa: E402
     _rt_df, idx, _truth = cohort
-    rt_study_df = build_rt_integrity(idx.table)
-    rollup_df = build_rt_rollup(idx.table)
     _root, long_idx = longitudinal
+    # One index for both engines, as a real run has. Before the integrity and completeness
+    # tabs were merged the fixture could feed them two disjoint cohorts and nothing noticed;
+    # now that one row carries both verdicts, feeding them different patients would mean the
+    # follow-up column was never rendered at all and the merge went untested.
+    both = pd.concat([idx.table, long_idx.table], ignore_index=True)
+    rt_study_df = build_rt_integrity(both)
+    rollup_df = build_rt_rollup(both)
     comp_state, comp_hover, comp_long = build_completeness(long_idx.table, DEFAULT_PROTOCOL)
     manifest = long_idx.manifest
     out_dir = tmp_path_factory.mktemp("render_output")
     out_path = out_dir / "cohort_report.html"
     result = render_cohort_report(
         rt_study_df, rollup_df, comp_state, comp_hover, comp_long,
-        manifest, DEFAULT_PROTOCOL, str(out_path), table=long_idx.table
+        manifest, DEFAULT_PROTOCOL, str(out_path), table=both
     )
     html_text = out_path.read_text(encoding="utf-8")
     return html_text, result
@@ -379,20 +384,18 @@ class TestRenderCohortReport:
             f"HTML too small ({len(html_text)} bytes) — Plotly.js probably not embedded inline"
         )
 
-    def test_render_three_tabs_present(self, rendered_html):
-        """RT integrity, Cohort map and Completeness must all appear in the markup.
+    def test_completeness_has_no_tab_of_its_own(self, rendered_html):
+        """Integrity and follow-up are two verdicts about one patient, so they share one tab.
 
-        The old Plotly completeness tab was removed in v0.7; v0.12 brings completeness back
-        as a readable grid. Fails if the third tab (button or panel) is not wired up.
+        Splitting them made a reader reconcile two tables by patient id to answer one
+        question. Fails if a separate completeness tab or panel comes back.
         """
         html_text, _ = rendered_html
-        assert 'data-tab="rt"' in html_text, "RT integrity tab not found in HTML"
-        assert 'data-tab="map"' in html_text, "Cohort map tab not found in HTML"
-        assert 'data-tab="comp"' in html_text, "Completeness tab not found in HTML"
-        assert "RT integrity" in html_text, "RT integrity tab label missing"
-        assert "Cohort map" in html_text, "Cohort map tab label missing"
-        assert "Completeness" in html_text, "Completeness tab label missing"
-        assert 'data-panel="comp"' in html_text, "Completeness panel not found in HTML"
+        assert 'data-tab="rt"' in html_text, "integrity tab not found in HTML"
+        assert 'data-tab="map"' in html_text, "cohort map tab not found in HTML"
+        assert 'data-tab="comp"' not in html_text, "completeness tab is back"
+        assert 'data-panel="comp"' not in html_text, "completeness panel is back"
+        assert "Integrity &amp; follow-up" in html_text, "merged tab label missing"
 
     def test_render_kpi_cards_present(self, rendered_html):
         """KPI section must contain OK/WARN/INCOMPLETE/NO_RT verdict labels + the completeness
@@ -541,65 +544,87 @@ class TestCohortMap:
         assert '"CT"' in html_text and '"MR"' in html_text, "modality legend entries missing"
 
 
-class TestCompletenessTab:
-    """The third tab: the completeness grid, rendered by the shared
-    ``report_completeness.completeness_section_html`` — same markup as the standalone page."""
+class TestFollowUpMergedIntoTheIntegrityTable:
+    """Completeness no longer has a tab; it rides in the integrity row, from the same
+    renderer the standalone page uses."""
 
-    def test_panel_holds_the_shared_completeness_grid(self, rendered_html):
-        """The panel must contain the shared grid, not a tab-only variant.
-
-        Fails if the cohort report grows its own second completeness renderer.
-        """
+    def test_the_integrity_row_carries_the_follow_up_chips(self, rendered_html):
+        """One row, both verdicts. Fails if the follow-up column is dropped or left empty."""
         html_text, _ = rendered_html
-        assert "id='comp-grid'" in html_text, "completeness grid table missing from the report"
-        assert "<tr class='crow'" in html_text, "no patient rows in the completeness grid"
-
-    def test_panel_has_the_same_toolbar_controls_as_the_rt_table(self, rendered_html):
-        """Filter box, only-incomplete toggle and Export CSV, exactly like the RT table.
-
-        Fails if the tab ships a read-only grid with no interactions.
-        """
-        html_text, _ = rendered_html
-        for control in ("id='comp-filter'", "id='comp-only-missing'", "id='comp-export'"):
-            assert control in html_text, f"completeness control {control} missing"
-
-    def test_panel_explains_what_the_protocol_expects(self, rendered_html):
-        """The protocol line must justify 'expected' inside the report too.
-
-        Fails if the protocol line is rendered only on the standalone page.
-        """
-        html_text, _ = rendered_html
-        assert f"Protocol {DEFAULT_PROTOCOL.name}" in html_text
+        assert "class='c-fu'" in html_text, "follow-up column missing from the integrity table"
+        assert "class='fu-grp'" in html_text, "follow-up chips are not grouped by timepoint"
         for tp in DEFAULT_PROTOCOL.timepoints:
-            assert f">{tp}</b>" in html_text, f"timepoint {tp} missing from the protocol line"
+            assert f"class='fu-lab'>{tp}</span>" in html_text, (
+                f"timepoint {tp} is not labelled in the follow-up cell — a chip that says "
+                f"'MR missing' without saying which visit is half an instruction"
+            )
 
-    def test_every_completeness_chip_is_labelled_with_its_own_state(self, rendered_html):
+    def test_the_cohort_gap_table_leads_the_tab(self, rendered_html):
+        """The one thing on this tab that is not per-patient keeps its own block, above the
+        queue: a QC round re-exports a timepoint and a modality, not a patient."""
+        html_text, _ = rendered_html
+        assert "id='comp-gaps'" in html_text, "cohort gap table missing"
+        assert html_text.index("id='comp-gaps'") < html_text.index('id="rt-table"'), (
+            "the gap table must come before the per-patient queue"
+        )
+
+    def test_no_patient_graded_by_the_protocol_is_silently_dropped(self, rendered_html):
+        """The merged table is keyed on the RT rollup. Anyone the rollup does not list would
+        simply not be drawn, and a patient silently absent from a QC registry is the one
+        failure a QC registry cannot have."""
+        from DICOM_discovery.report_cohort import followup_only_patients
+        html_text, _ = rendered_html
+        rows = [{"patient_id": "A"}]
+        assert followup_only_patients(rows, {"A": {}, "B": {}}) == ["B"]
+        assert followup_only_patients(rows, {"A": {}}) == []
+        # In this fixture both engines see one index, so nothing is orphaned and no note fires.
+        assert "have no row below" not in html_text
+
+    def test_the_displaced_study_counts_survive_in_the_drill_down(self, rendered_html):
+        """Studies and RT studies left the table to make room. They did not leave the report:
+        dropping a column has to mean moving the number, not losing it."""
+        html_text, _ = rendered_html
+        assert "<b>Studies</b>" in html_text
+        assert "carry RT objects" in html_text
+
+    def test_the_follow_up_cell_exports_its_meaning_not_its_glyphs(self, rendered_html):
+        """A generic CSV export reads cell text, and a cell of chips reads as a run of glyphs
+        glued to screen-reader words. The cell carries what it means instead."""
+        import re
+        html_text, _ = rendered_html
+        exports = re.findall(r"class='c-fu' data-export=\"([^\"]*)\"", html_text)
+        assert exports, "no follow-up cell carries a data-export value"
+        assert any("missing:" in e for e in exports), (
+            "no exported follow-up names the missing timepoint/modality pairs"
+        )
+        assert not any(("✓" in e or "✗" in e) for e in exports), (
+            "a glyph reached the exported text"
+        )
+
+    def test_every_follow_up_chip_is_labelled_with_its_own_state(self, rendered_html):
         """Every chip, not merely one of them, must name its own state accessibly.
 
-        An "any chip has a label" check passes when a single chip anywhere in a 12-patient
-        report keeps its aria-label. This counts the chips, requires the count of accessible
-        labels to match exactly, and checks each label against that chip's own data
-        attributes — so one unlabelled or mislabelled state branch fails.
+        An "any chip has a label" check passes when a single chip anywhere in the report keeps
+        its aria-label. This counts the chips, requires the count of accessible labels to match
+        exactly, and checks each label against that chip's own data attributes — so one
+        unlabelled or mislabelled state branch fails.
         """
         import re
         html_text, _ = rendered_html
         chips = re.findall(r"<span class='chip chip-[A-Z]+'[^>]*>", html_text)
-        assert chips, "no completeness chips rendered in the report"
+        assert chips, "no follow-up chips rendered in the report"
         assert len(chips) == html_text.count("class='chip "), "a chip is missing its state class"
         words = {"PRESENT": "present", "MISSING": "missing",
                  "EXTRA": "extra", "UNMAPPED": "unmapped"}
-        labelled = 0
         for chip in chips:
             tp = re.search(r"data-tp='([^']*)'", chip).group(1)
-            mod = re.search(r"data-mod='([^']*)'", chip).group(1)
             state = re.search(r"data-state='([^']*)'", chip).group(1)
-            assert f"aria-label='{tp} {mod} {words[state]}'" in chip, (
-                f"chip labelled inconsistently with its own state: {chip}"
-            )
-            labelled += 1
-        assert labelled == len(chips)
+            mod_m = re.search(r"data-mod='([^']*)'", chip)
+            expected = (f"aria-label='{tp} {mod_m.group(1)} {words[state]}'" if mod_m
+                        else f"aria-label='{tp} {words[state]}'")
+            assert expected in chip, f"chip labelled inconsistently with its own state: {chip}"
 
-    def test_no_completeness_cell_carries_a_state_outside_the_four_valid_ones(self, rendered_html):
+    def test_no_follow_up_cell_carries_a_state_outside_the_four_valid_ones(self, rendered_html):
         """Only PRESENT / MISSING / EXTRA / UNMAPPED may reach the page.
 
         Stronger than pinning the old ``chip-NA`` class name: a grey "not expected" cell
@@ -609,7 +634,7 @@ class TestCompletenessTab:
         import re
         html_text, _ = rendered_html
         states = set(re.findall(r"data-state='([^']*)'", html_text))
-        assert states, "no completeness cell states rendered"
+        assert states, "no follow-up cell states rendered"
         assert states <= {"PRESENT", "MISSING", "EXTRA", "UNMAPPED"}, f"unexpected: {states}"
 
     def test_report_stylesheet_places_the_completeness_rules_after_the_base_rules(self, rendered_html):
@@ -623,6 +648,8 @@ class TestCompletenessTab:
         css = html_text.split("<style>", 1)[1].split("</style>", 1)[0]
         assert css.index(".cgrid{") > css.index(".grid{")
         assert css.index(".sw-blank{") > css.index(".sw{")
+        # The chip palette must also land after the base rules it tints.
+        assert css.index(".chip-MISSING{") > css.index(".chip{")
 
 
 class TestKpiFilterChips:

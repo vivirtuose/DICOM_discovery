@@ -235,26 +235,37 @@ def _tp_chip_html(timepoint: str, state: str) -> str:
             f"<span class='sr'>{word}</span></span>")
 
 
-def _row_html(patient: dict, timepoints: List[str]) -> str:
-    pid = str(patient.get("patient", ""))
+def followup_status_html(patient: dict) -> str:
+    """The badge saying how much of the protocol this patient is missing.
+
+    Public because the integrity table renders it beside the RT verdict. Protocol follow-up
+    and RT-chain integrity are two verdicts about one patient, and someone chasing data wants
+    them on one row rather than in two tabs they have to reconcile by hand.
+
+    The binding ruling from the data layer shows up here: a patient the protocol asks nothing
+    of comes out numerically identical to a fully complete one (0 missing, 100 %). Saying
+    "0 / 0 missing" would read as a clean bill of health, so the badge states the truth
+    instead. A fully-UNMAPPED patient hits the same ``n_expected == 0`` branch for a different
+    reason - the protocol *did* expect things, none of their studies could be dated onto the
+    timeline - so it gets its own wording rather than reading as "nothing expected".
+    """
     n_expected = int(patient.get("n_expected", 0) or 0)
     n_missing = int(patient.get("n_missing", 0) or 0)
+    if _is_fully_unmapped(patient):
+        return "<span class='cstat unmapped'>cannot be placed on the timeline</span>"
+    if n_expected == 0:
+        return "<span class='cstat none'>nothing expected</span>"
+    cls = "cstat" if n_missing == 0 else "cstat bad"
+    return f"<span class='{cls}'>{n_missing} / {n_expected} missing</span>"
+
+
+def followup_cells_html(patient: dict, timepoints: List[str]) -> str:
+    """One ``<td>`` per protocol timepoint, holding this patient's chips for it.
+
+    Returns the cells rather than a whole row so the integrity table can splice them into a
+    row it owns: one renderer for the chips, two tables that can never draw them differently.
+    """
     fully_unmapped = _is_fully_unmapped(patient)
-
-    # The binding ruling from the data layer: a patient the protocol asks nothing of comes out
-    # numerically identical to a fully complete one (0 missing, 100 %). Saying "0 / 0 missing"
-    # would read as a clean bill of health, so the row states the truth instead. A
-    # fully-UNMAPPED patient hits the same n_expected == 0 branch for a different reason — the
-    # protocol *did* expect things, none of their studies could be dated onto the timeline —
-    # so it gets its own, distinct wording rather than reading as "nothing expected".
-    if fully_unmapped:
-        status = "<span class='cstat unmapped'>cannot be placed on the timeline</span>"
-    elif n_expected == 0:
-        status = "<span class='cstat none'>nothing expected</span>"
-    else:
-        cls = "cstat" if n_missing == 0 else "cstat bad"
-        status = f"<span class='{cls}'>{n_missing} / {n_expected} missing</span>"
-
     by_tp = {str(c.get("timepoint")): c for c in patient.get("cells", [])}
     tds = []
     for tp in timepoints:
@@ -272,13 +283,90 @@ def _row_html(patient: dict, timepoints: List[str]) -> str:
             continue
         chips = "".join(_chip_html(tp, str(it["modality"]), str(it["state"])) for it in items)
         tds.append(f"<td class='ccell' data-tp='{_esc(tp)}'>{chips}</td>")
+    return "".join(tds)
 
+
+def followup_inline_html(patient: dict, timepoints: List[str]) -> str:
+    """The whole follow-up, as one inline cell for the integrity table.
+
+    The standalone grid gives each timepoint its own column; the integrity table cannot afford
+    four columns beside the verdict, the chain and the action, so the timepoints are grouped
+    inside a single cell instead - each group labelled, so a chip still says *when* as well as
+    *what*. Same chips, same states, same colours as the grid: one renderer, two layouts.
+    """
+    fully_unmapped = _is_fully_unmapped(patient)
+    by_tp = {str(c.get("timepoint")): c for c in patient.get("cells", [])}
+    groups = []
+    for tp in timepoints:
+        items = (by_tp.get(tp) or {}).get("items") or []
+        if not items:
+            continue          # absence of ink, exactly as in the grid
+        if fully_unmapped:
+            state = str((by_tp.get(tp) or {}).get("state") or "UNMAPPED")
+            chips = _tp_chip_html(tp, state)
+        else:
+            chips = "".join(_chip_html(tp, str(it["modality"]), str(it["state"]))
+                            for it in items)
+        groups.append(f"<span class='fu-grp'><span class='fu-lab'>{_esc(tp)}</span>{chips}</span>")
+    if not groups:
+        return "<span class='dim'>&mdash;</span>"
+    return "".join(groups)
+
+
+def followup_export_text(patient: dict) -> str:
+    """What the follow-up column contributes to a CSV row.
+
+    A generic table export reads cell text, and a cell of chips reads as a run of glyphs and
+    screen-reader words glued together. This names the missing pairs instead, so the exported
+    file says which re-export closes the gap - the only thing the column is for.
+    """
+    if _is_fully_unmapped(patient):
+        return "cannot be placed on the timeline"
+    n_expected = int(patient.get("n_expected", 0) or 0)
+    if n_expected == 0:
+        return "nothing expected"
+    missing = [f"{c['timepoint']} {it['modality']}"
+               for c in patient.get("cells", [])
+               for it in (c.get("items") or []) if it.get("state") == "MISSING"]
+    if not missing:
+        return "complete"
+    return f"{len(missing)}/{n_expected} missing: " + ", ".join(missing)
+
+
+def followup_detail_html(patient: dict, timepoints: List[str]) -> str:
+    """The per-timepoint, per-modality breakdown, for a patient's drill-down panel.
+
+    The summary row shows one chip per modality already; this spells out the same states as
+    words, timepoint by timepoint, because a drill-down is where someone reads carefully
+    rather than scans.
+    """
+    by_tp = {str(c.get("timepoint")): c for c in patient.get("cells", [])}
+    lines = []
+    for tp in timepoints:
+        items = (by_tp.get(tp) or {}).get("items") or []
+        if not items:
+            lines.append(f"<li><span class='fu-tp mono'>{_esc(tp)}</span>"
+                         "<span class='dim'>nothing expected</span></li>")
+            continue
+        words = ", ".join(
+            f"<span class='fu-item fu-{_esc(str(it['state']))}'>{_esc(str(it['modality']))} "
+            f"{_STATE_WORD.get(str(it['state']), str(it['state']).lower())}</span>"
+            for it in items
+        )
+        lines.append(f"<li><span class='fu-tp mono'>{_esc(tp)}</span>{words}</li>")
+    return f"<ul class='fu-detail'>{''.join(lines)}</ul>"
+
+
+def _row_html(patient: dict, timepoints: List[str]) -> str:
+    pid = str(patient.get("patient", ""))
+    n_expected = int(patient.get("n_expected", 0) or 0)
+    n_missing = int(patient.get("n_missing", 0) or 0)
     # See _grid_html: the slack column keeps the timepoint columns at content width.
-    tds.append("<td class='cslack'></td>")
+    tds = followup_cells_html(patient, timepoints) + "<td class='cslack'></td>"
     return (f"<tr class='crow' data-pid='{_esc(pid)}' data-missing='{n_missing}' "
             f"data-expected='{n_expected}' data-filter='{_esc(pid.lower())}'>"
             f"<th class='cc-pid' scope='row'><span class='mono pid'>{_esc(pid)}</span>"
-            f"{status}</th>{''.join(tds)}</tr>")
+            f"{followup_status_html(patient)}</th>{tds}</tr>")
 
 
 def _grid_html(grid: List[dict], protocol: Protocol) -> str:
@@ -305,7 +393,7 @@ def _grid_html(grid: List[dict], protocol: Protocol) -> str:
 _WHO_LIMIT = 8
 
 
-def _gap_table_html(gaps: List[dict]) -> str:
+def gap_table_html(gaps: List[dict]) -> str:
     """The headline: one row per (timepoint, modality) that at least one patient is missing.
 
     This is the shape of the action. A QC round does not re-export a patient, it re-exports a
@@ -376,7 +464,7 @@ def completeness_section_html(grid: List[dict], kpis: dict, protocol: Protocol,
              f"({_plural(len(grid), 'patient')})</summary>"
              f"{_toolbar_html()}{_legend_html()}{_grid_html(grid, protocol)}"
              f"</details>")
-    return f"<section class='comp'>{head}{_gap_table_html(gaps)}{drill}</section>"
+    return f"<section class='comp'>{head}{gap_table_html(gaps)}{drill}</section>"
 
 
 # --------------------------------------------------------------------------- #
@@ -489,6 +577,22 @@ def completeness_styles() -> str:
 .ccell.empty{background:none}
 /* Takes every leftover pixel so the timepoint columns stay at content width — see _grid_html. */
 .cgrid .cslack{width:100%;padding:0;border-bottom:1px solid var(--line)}
+
+/* ---- follow-up, inline in the integrity table ----
+   The grid can spend a column per timepoint; the integrity row cannot, so the timepoints are
+   grouped inside one cell and each group carries its own label. Without the label a chip says
+   "MR missing" without saying which visit, which is the half that decides what to re-export. */
+.c-fu{white-space:normal;min-width:230px}
+.fu-grp{display:inline-flex;align-items:center;gap:3px;margin:2px 10px 2px 0;
+  padding-left:7px;border-left:2px solid var(--line)}
+.fu-lab{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.04em;
+  color:var(--dim);text-transform:uppercase;margin-right:2px}
+.fu-detail{list-style:none;margin:6px 0 0;padding:0;font-size:11.5px;line-height:1.9}
+.fu-detail li{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.fu-tp{min-width:64px;font-weight:600;color:var(--ink);font-size:11px}
+.fu-item{color:var(--muted)}
+.fu-MISSING{color:var(--incomplete);font-weight:600}
+.fu-UNMAPPED{color:var(--warn)}
 
 /* ---- the chip: modality + glyph, never colour alone ---- */
 .chip{

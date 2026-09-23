@@ -35,15 +35,17 @@ from .completeness import (
     Protocol,
     completeness_gaps,
     completeness_grid,
-    completeness_kpis,
     patient_completeness,
 )
 from .fsutil import atomic_write_text
 from .report_completeness import (
     RUO_TEXT,
-    completeness_script,
-    completeness_section_html,
     completeness_styles,
+    followup_detail_html,
+    followup_export_text,
+    followup_inline_html,
+    followup_status_html,
+    gap_table_html,
 )
 from .report_overview import (
     cohort_overview,
@@ -383,7 +385,28 @@ def _kpi_html(kpis: dict) -> str:
     return f'<section class="kpis">{"".join(cells)}</section>'
 
 
-def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]]) -> str:
+def followup_only_patients(rows: List[dict], followup: Dict[str, dict]) -> List[str]:
+    """Patients the protocol grades that the RT table has no row for.
+
+    The merged table is keyed on the RT rollup, so anyone the rollup does not list would
+    simply not be drawn - and a patient silently absent from a QC registry is the one failure
+    mode a QC registry cannot have. In a normal run both views come from one index and this is
+    empty; when it is not, the table says so by name rather than quietly shrinking.
+    """
+    listed = {r["patient_id"] for r in rows}
+    return sorted(pid for pid in followup if pid not in listed)
+
+
+def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
+                   followup: Dict[str, dict], timepoints: List[str]) -> str:
+    """The cohort's one work queue: RT-chain integrity and protocol follow-up on one row.
+
+    These were two tabs. They are two verdicts about the same patient, and splitting them made
+    a reader reconcile two tables by patient id to answer one question - "what do I re-export
+    for this person?". Folding follow-up in costs one column; the two numeric columns it
+    displaces (studies, RT studies) move into the drill-down, where they were being read
+    carefully anyway rather than scanned.
+    """
     body = []
     for i, r in enumerate(rows):
         pid = r["patient_id"]
@@ -392,19 +415,26 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]]) -> str:
         has_detail = bool(detail)
         caret = "▸" if has_detail else ""
         # filter text: everything searchable, lowercased, in a data attribute.
+        fu = followup.get(pid)
+        fu_text = followup_export_text(fu) if fu else ""
+        fu_missing = int((fu or {}).get("n_missing", 0) or 0)
+        # The filter text carries the follow-up too, so typing "M3" or "RTDOSE" finds the
+        # patients missing it without a second search box over a second table.
         ftext = " ".join([pid, r["rt_status"], r["reason"], r["action"],
-                          "fragmented" if r["fragmented"] else ""]).lower()
+                          "fragmented" if r["fragmented"] else "", fu_text]).lower()
         body.append(
             f"<tr class='prow{' has-detail' if has_detail else ''}' "
             f"data-filter=\"{_esc(ftext)}\" data-row='{i}' "
             f"data-pid='{_esc(pid)}' data-status='{_esc(r['rt_status'])}' "
-            f"data-nstudies='{r['n_studies']}' data-nrt='{r['n_rt_studies']}'>"
+            f"data-nstudies='{r['n_studies']}' data-nrt='{r['n_rt_studies']}' "
+            f"data-missing='{fu_missing}'>"
             f"<td class='c-caret'>{caret}</td>"
             f"<td class='c-pid mono'>{_esc(pid)}</td>"
             f"<td class='c-status'>{_verdict_pill(r['rt_status'])}{frag}</td>"
             f"<td class='c-presence'>{_presence_strip_html(r['chain'], r['targets'])}</td>"
-            f"<td class='c-num mono'>{r['n_studies']}</td>"
-            f"<td class='c-num mono'>{r['n_rt_studies']}</td>"
+            f"<td class='c-fu' data-export=\"{_esc(fu_text)}\">"
+            f"{followup_inline_html(fu, timepoints) if fu else '<span class=dim>—</span>'}"
+            f"{('<div class=c-fustat>' + followup_status_html(fu) + '</div>') if fu else ''}</td>"
             f"<td class='c-reason'>{_esc(r['reason']) or '<span class=dim>—</span>'}</td>"
             f"<td class='c-action'>{_esc(r['action']) or '<span class=dim>—</span>'}</td>"
             "</tr>"
@@ -446,11 +476,20 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]]) -> str:
                 )
             # Drill-down opens with a recap: the verdict, the full data-presence strip, and
             # the recommended action — then the per-study findings beneath it.
+            fu_block = ""
+            if fu:
+                fu_block = (f"<div class='detail-meta'><b>Protocol follow-up</b>"
+                            f"<span>{followup_status_html(fu)}"
+                            f"{followup_detail_html(fu, timepoints)}</span></div>")
             recap = (
                 "<div class='detail-summary'>"
                 f"<div class='detail-meta'><b>Verdict</b>{_verdict_pill(r['rt_status'])}{frag}</div>"
                 f"<div class='detail-meta'><b>Data presence</b>"
                 f"{_presence_strip_html(r['chain'], r['targets'], detailed=True)}</div>"
+                f"<div class='detail-meta'><b>Studies</b>"
+                f"<span class='mono'>{r['n_studies']}</span>"
+                f"<span class='dim'>of which {r['n_rt_studies']} carry RT objects</span></div>"
+                f"{fu_block}"
                 f"<div class='detail-meta'><b>Issue</b>"
                 f"<span>{_esc(r['reason']) or '—'}</span></div>"
                 f"<div class='detail-meta'><b>Recommended action</b>"
@@ -458,15 +497,25 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]]) -> str:
                 "</div>"
             )
             body.append(
-                f"<tr class='drow' data-detail-for='{i}' hidden><td colspan='8'>"
+                f"<tr class='drow' data-detail-for='{i}' hidden><td colspan='7'>"
                 f"<div class='detail'>{recap}<div class='detail-title'>"
                 f"Per-study findings — {_esc(pid)}</div>{''.join(detail_html)}</div>"
                 "</td></tr>"
             )
     rows_html = "".join(body) or (
-        "<tr><td colspan='8' class='dim' style='text-align:center;padding:24px'>"
+        "<tr><td colspan='7' class='dim' style='text-align:center;padding:24px'>"
         "no patients</td></tr>")
-    return f"""<div class="toolbar">
+    orphans = followup_only_patients(rows, followup)
+    orphan_note = ""
+    if orphans:
+        shown = ", ".join(_esc(p) for p in orphans[:12])
+        more = f" +{len(orphans) - 12} more" if len(orphans) > 12 else ""
+        orphan_note = (
+            f"<p class='orphan-note'><b>{len(orphans)} patient(s) graded against the protocol "
+            f"have no row below</b> - the RT index does not list them: "
+            f"<span class='mono'>{shown}{more}</span>. Their follow-up is in the gap table "
+            f"above; their RT chain was never assessed.</p>")
+    return f"""{orphan_note}<div class="toolbar">
   <input type="search" id="rt-filter" class="filter" placeholder="Filter patients…"
          aria-label="filter RT table">
   <button type="button" class="btn" id="rt-export">Export CSV</button>
@@ -477,9 +526,8 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]]) -> str:
     <th class="c-caret" aria-hidden="true"></th>
     <th class="sortable" data-key="pid" data-type="text">Patient</th>
     <th class="sortable" data-key="status" data-type="text">Verdict</th>
-    <th>Data presence</th>
-    <th class="sortable num" data-key="nstudies" data-type="num">Studies</th>
-    <th class="sortable num" data-key="nrt" data-type="num">RT studies</th>
+    <th>RT chain</th>
+    <th class="sortable num" data-key="missing" data-type="num">Protocol follow-up</th>
     <th>Issue</th>
     <th>Action</th>
   </tr></thead>
@@ -750,6 +798,22 @@ footer b{color:var(--muted)}
   .hint{display:none}
   .mv{max-width:24ch}
 }
+
+/* ---- the cohort gap block: the one thing on this tab that is not per-patient ---- */
+.gapblock{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:15px 17px 17px;margin-bottom:18px;border-left:3px solid var(--incomplete)}
+.gaph{margin:0 0 4px;font-size:13px;font-weight:600;color:var(--ink)}
+.gaplede{margin:0 0 12px;font-size:12px;color:var(--muted);line-height:1.6;max-width:80ch}
+.gapblock .gaptable{margin-bottom:0}
+/* The follow-up badge sits under its chips: the chips say what is missing, the badge says
+   how much, and stacking them keeps the column from growing a second row of text. */
+.c-fustat{margin-top:3px}
+
+/* A patient the protocol grades but the RT index never listed must be named, not dropped. */
+.orphan-note{background:#fdf6e9;border:1px solid #e7d4ae;border-left:3px solid var(--warn);
+  border-radius:var(--radius-sm);padding:10px 13px;margin:0 0 14px;font-size:12px;
+  color:var(--text);line-height:1.6}
+.orphan-note b{color:var(--warn)}
 """
 
 
@@ -890,7 +954,10 @@ def _script() -> str:
       var cells = [];
       Array.prototype.slice.call(tr.children).forEach(function(td){
         if(td.classList.contains('c-caret')) return;
-        cells.push(td.textContent.replace(/\s+/g,' ').trim());
+        // A cell whose text is a run of glyphs and screen-reader words exports what it
+        // MEANS instead, via data-export — otherwise the CSV says "✗MRmissing✓CTpresent".
+        var ex = td.getAttribute('data-export');
+        cells.push(ex !== null ? ex : td.textContent.replace(/\s+/g,' ').trim());
       });
       if(cells.join('').length) rows.push(cells);
     });
@@ -1002,12 +1069,14 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
     cohort_map = _timeline_map_html(table, embed_js=True)
     title = f"DICOM_discovery cohort report — {protocol.name}"
 
-    # Completeness: the same grid the standalone `completeness` command renders, from the
-    # same function — one implementation, so the tab and the file can never disagree.
+    # Completeness no longer has a tab of its own: it is a second verdict about the same
+    # patient, so it rides in the integrity row. What survives as its own block is the cohort
+    # gap table, which is not per-patient at all — it says which single re-export closes the
+    # largest hole, and that question has no patient to hang off.
     comp_grid = completeness_grid(comp_long)
-    comp_kpis = completeness_kpis(comp_long)
     comp_gaps = completeness_gaps(comp_long)
-    comp_section = completeness_section_html(comp_grid, comp_kpis, protocol, comp_gaps)
+    followup = {str(p["patient"]): p for p in comp_grid}
+    timepoints = list(protocol.timepoints)
 
     # The overview opens the report. A reader who lands on a work queue has no way to check
     # that the queue is about the cohort they meant; this tab answers that first, and grades
@@ -1028,11 +1097,9 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
     <button class="tab" role="tab" data-tab="overview" aria-selected="true">
       Overview</button>
     <button class="tab" role="tab" data-tab="rt" aria-selected="false">
-      RT integrity<span class="count">{n_rt}</span></button>
+      Integrity &amp; follow-up<span class="count">{n_rt}</span></button>
     <button class="tab" role="tab" data-tab="map" aria-selected="false">
       Cohort map</button>
-    <button class="tab" role="tab" data-tab="comp" aria-selected="false">
-      Completeness<span class="count">{comp_kpis["n_patients"]}</span></button>
   </div>
 
   <section class="panel" role="tabpanel" data-panel="overview">
@@ -1040,7 +1107,14 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
   </section>
 
   <section class="panel" role="tabpanel" data-panel="rt" hidden>
-    {_rt_table_html(rt_rows, findings)}
+    <section class="gapblock">
+      <h3 class="gaph">Biggest gaps in the cohort</h3>
+      <p class="gaplede">A QC round does not re-export a patient, it re-exports a timepoint
+        and a modality for everyone missing it. Worst first &mdash; the top row is the single
+        batch that closes the largest hole.</p>
+      {gap_table_html(comp_gaps)}
+    </section>
+    {_rt_table_html(rt_rows, findings, followup, timepoints)}
   </section>
 
   <section class="panel" role="tabpanel" data-panel="map" hidden>
@@ -1050,16 +1124,13 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
     <div class="plot">{cohort_map}</div>
   </section>
 
-  <section class="panel" role="tabpanel" data-panel="comp" hidden>
-    {comp_section}
-  </section>
 </main>
 <footer>
   <b>{_esc(RUO_TEXT)}</b><br>
   Header-only cohort QC over synthetic or de-identified DICOM. Not a clinical safety check.
   Generated by DICOM_discovery.
 </footer>
-<script>{_script()}{completeness_script()}{overview_script()}</script>
+<script>{_script()}{overview_script()}</script>
 </body></html>"""
 
     atomic_write_text(out, page)
