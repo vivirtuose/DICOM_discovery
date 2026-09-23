@@ -121,18 +121,27 @@ def test_completeness_grid_matches_patient_completeness(longitudinal):
 
 
 def test_completeness_grid_cell_state_is_worst_of_its_items():
-    """A cell's state is the worst item state present (MISSING > UNMAPPED > EXTRA > PRESENT).
-    If the cell picked e.g. the *first* item instead of the worst, this would fail."""
+    """A cell's state is the worst item state present, over the full five-tier chain
+    MISSING > UNMAPPED > EXTRA > PRESENT > NA. Each timepoint below isolates one adjacent
+    pair in that chain, so swapping any two tiers in _CELL_RANK breaks a specific assertion
+    rather than passing by accident (e.g. swapping EXTRA/UNMAPPED flips M12 to 'EXTRA')."""
     long_df = _long([
         ["A", "baseline", "CT", True, True, "PRESENT"],
         ["A", "baseline", "MR", True, False, "MISSING"],
         ["A", "M3", "CT", False, True, "EXTRA"],
         ["A", "M3", "MR", True, True, "PRESENT"],
+        ["A", "M6", "CT", True, False, "MISSING"],
+        ["A", "M6", "MR", True, False, "UNMAPPED"],
+        ["A", "M12", "CT", True, False, "UNMAPPED"],
+        ["A", "M12", "MR", False, True, "EXTRA"],
+        ["A", "M12", "RTDOSE", True, True, "PRESENT"],
     ])
     grid = completeness_grid(long_df)
     cells = {c["timepoint"]: c for c in grid[0]["cells"]}
-    assert cells["baseline"]["state"] == "MISSING"
-    assert cells["M3"]["state"] == "EXTRA"
+    assert cells["baseline"]["state"] == "MISSING"   # MISSING > PRESENT
+    assert cells["M3"]["state"] == "EXTRA"            # EXTRA > PRESENT
+    assert cells["M6"]["state"] == "MISSING"          # MISSING > UNMAPPED
+    assert cells["M12"]["state"] == "UNMAPPED"        # UNMAPPED > EXTRA > PRESENT
 
 
 def test_completeness_grid_excludes_na_items_but_keeps_the_cell():
