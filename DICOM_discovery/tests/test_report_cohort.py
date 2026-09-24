@@ -486,15 +486,22 @@ class TestRegistreReskin:
     verdict badge, and WARN/INCOMPLETE ordered to the top. The interactive Plotly
     completeness map must remain (covered by TestRenderCohortReport)."""
 
-    def test_action_column_header_present(self, rendered_html):
+    def test_the_queue_names_issues_and_no_longer_prescribes_actions(self, rendered_html):
+        """Recommended actions were removed on request: the report says what is wrong and
+        leaves the remedy to the reader. The RT engine's causes must still surface."""
         html_text, _ = rendered_html
-        assert ">Action<" in html_text, "RT table is missing an Action column header"
+        assert ">Issues<" in html_text
+        assert ">Action<" not in html_text and "Recommended action" not in html_text
+        assert "Re-export RTDOSE" not in html_text
+        assert "missing RTDOSE" in html_text
+        assert "missing target(s): PTV" in html_text
 
-    def test_recommended_actions_are_rendered(self, rendered_html):
-        # P006 is INCOMPLETE (missing RTDOSE) -> re-export it; P007 misses PTV -> contour it.
+    def test_follow_up_gaps_are_issues_too(self, rendered_html):
+        """A patient whose RT chain is fine but who misses follow-up imaging used to show an
+        empty Issue box beside a red "n / m missing" badge."""
         html_text, _ = rendered_html
-        assert "Re-export RTDOSE" in html_text, "re-export action not surfaced in the report"
-        assert "target contour" in html_text.lower(), "contouring action not surfaced in the report"
+        assert "MR missing at" in html_text
+        assert "class='noissue'" in html_text
 
     def test_verdict_badge_is_not_colour_only(self, rendered_html):
         # WCAG: a verdict must be legible without colour — a per-status shape class,
@@ -581,12 +588,14 @@ class TestFollowUpMergedIntoTheIntegrityTable:
         assert "have no row below" not in html_text
 
     def test_the_drill_down_gives_each_fact_its_own_card(self, rendered_html):
-        """Six facts flowed together in one wrapping strip read as one paragraph of bold
-        labels. Each gets a bordered card, and the left edge says what kind of fact it is:
-        neutral for description, red for the problem, green for the instruction."""
+        """Facts flowed together in one wrapping strip read as one paragraph of bold labels.
+        Each gets a bordered card, and the left edge says what kind of fact it is: neutral
+        for description, red when there is an issue, green when there is none."""
         html_text, _ = rendered_html
-        assert "class='detail-meta issue'" in html_text, "the problem card is not marked"
-        assert "class='detail-meta act'" in html_text, "the instruction card is not marked"
+        # The Issues card spans the row; its edge is red when something is wrong and green
+        # when nothing is - there is no separate instruction card any more.
+        assert "class='detail-meta wide issue'" in html_text, "the problem card is not marked"
+        assert "class='detail-meta wide act'" in html_text, "a clean patient's card is not marked"
         assert "class='detail-meta wide'" in html_text, (
             "the wide facts (RT chain, follow-up) must span the row rather than be squeezed"
         )
@@ -692,3 +701,39 @@ class TestKpiFilterChips:
         html_text, _ = rendered_html
         assert "applyRtFilter" in html_text, "RT table filter function missing"
         assert "filterMap" in html_text, "cohort-map filter function missing"
+
+
+
+def test_patient_issues_merges_both_engines_and_names_the_ungradeable():
+    from DICOM_discovery.report_cohort import patient_issues
+    fu = {"n_expected": 8, "cells": [
+        {"timepoint": "baseline", "items": [{"modality": "CT", "state": "PRESENT"},
+                                            {"modality": "RTDOSE", "state": "MISSING"}]},
+        {"timepoint": "M3", "items": [{"modality": "MR", "state": "MISSING"}]},
+    ]}
+    assert patient_issues({"reason": "missing RTDOSE ; no planning image (CT/MR)"}, fu) == [
+        "missing RTDOSE", "no planning image (CT/MR)", "MR missing at M3"]
+    assert patient_issues({"reason": ""}, None) == []
+    unplaceable = {"n_expected": 0, "cells": [{"timepoint": "baseline", "state": "UNMAPPED",
+                                               "items": [{"modality": "CT", "state": "UNMAPPED"}]}]}
+    assert "cannot be graded" in patient_issues({"reason": ""}, unplaceable)[0]
+
+
+
+def test_the_cohort_map_fits_one_screen_and_zooms_both_ways():
+    """At 26px a patient, 98 patients made a 2 700px plot: no zoom could bring the cohort back
+    onto one screen. Height is capped and zoom-out is always on the bar."""
+    from DICOM_discovery.report_cohort import MAP_CONFIG, _map_height
+    assert _map_height(98) == 720
+    assert _map_height(3) >= 320
+    assert MAP_CONFIG["scrollZoom"] is True
+    assert "zoomOut2d" in MAP_CONFIG["modeBarButtonsToAdd"]
+
+
+
+def test_a_modality_missing_at_several_visits_is_one_issue():
+    from DICOM_discovery.report_cohort import patient_issues
+    fu = {"n_expected": 4, "cells": [
+        {"timepoint": tp, "items": [{"modality": "MR", "state": "MISSING"}]}
+        for tp in ("baseline", "M3", "M6", "M12")]}
+    assert patient_issues({"reason": ""}, fu) == ["MR missing at baseline, M3, M6, M12"]

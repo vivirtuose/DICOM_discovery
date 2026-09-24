@@ -207,6 +207,26 @@ def completeness_rows(comp_long: pd.DataFrame) -> List[dict]:
 # --------------------------------------------------------------------------- #
 # Heatmap figure (embedded, no CDN) — reuses report_map's colour encoding
 # --------------------------------------------------------------------------- #
+#: The map used to grow 26px per patient, so a 98-patient cohort was a 2 700px plot that no
+#: zoom could bring back onto one screen - "zooming out" meant scrolling the page. Height is
+#: now capped: the full cohort fits one view, and zooming in is how a reader gets detail.
+_MAP_MAX_HEIGHT = 720
+
+MAP_CONFIG = {
+    "scrollZoom": True,
+    "displayModeBar": True,
+    "displaylogo": False,
+    "doubleClick": "reset+autosize",
+    "modeBarButtonsToAdd": ["zoomIn2d", "zoomOut2d", "autoScale2d"],
+    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+    "toImageButtonOptions": {"format": "png", "filename": "cohort_map", "scale": 2},
+}
+
+
+def _map_height(n_patients: int) -> int:
+    return min(_MAP_MAX_HEIGHT, max(320, 26 * n_patients + 150))
+
+
 def _timeline_map_html(table: pd.DataFrame, embed_js: bool = True) -> str:
     """Interactive cohort timeline (reintegrated from file_discovery): one marker per
     (patient, study date, modality), coloured by modality. Every point is **legended**
@@ -257,8 +277,9 @@ def _timeline_map_html(table: pd.DataFrame, embed_js: bool = True) -> str:
     # in the theme's own hairline colour, hover labels on the card surface.
     fig.update_layout(
         template="plotly_white",
-        height=max(300, 26 * len(patients) + 150),
+        height=_map_height(len(patients)),
         margin=dict(t=24, l=96, r=24, b=56),
+        dragmode="zoom",
         xaxis=dict(title="DICOM study date", gridcolor="#e1e8f0", zerolinecolor="#b9c7d6",
                    linecolor="#b9c7d6"),
         yaxis=dict(title="patient", type="category", categoryorder="array",
@@ -269,7 +290,10 @@ def _timeline_map_html(table: pd.DataFrame, embed_js: bool = True) -> str:
         hoverlabel=dict(bgcolor="#fbfcfe", bordercolor="#0f6b87", font=dict(color="#10243b")),
         hovermode="closest", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
     )
-    return fig.to_html(full_html=False, include_plotlyjs=bool(embed_js))
+    # The whole cohort must be reachable in one view, and the view must zoom out as well as in:
+    # wheel zoom, explicit zoom-in / zoom-out / fit buttons always on the bar, double-click
+    # back to the full cohort.
+    return fig.to_html(full_html=False, include_plotlyjs=bool(embed_js), config=MAP_CONFIG)
 
 
 # --------------------------------------------------------------------------- #
@@ -390,6 +414,46 @@ def _kpi_html(kpis: dict) -> str:
     return f'<section class="kpis">{"".join(cells)}</section>'
 
 
+def patient_issues(row: dict, fu: Optional[dict]) -> List[str]:
+    """Everything wrong with one patient, in words: the RT chain first, then follow-up.
+
+    The Issue box used to show the RT engine's ``reason`` alone, which is empty for every
+    patient whose chain is fine - including a patient whose chain is fine but who is missing
+    three follow-up MRIs, the case the follow-up column exists to catch. An empty box beside
+    a red "3 / 8 missing" badge reads as "nothing to do". Both engines now feed the one list.
+    """
+    issues = [part.strip() for part in str(row.get("reason", "") or "").split(" ; ")
+              if part.strip()]
+    if not fu:
+        return issues
+    cells = fu.get("cells") or []
+    if cells and int(fu.get("n_expected", 0) or 0) == 0 and all(
+            str(c.get("state")) == "UNMAPPED" for c in cells):
+        issues.append("follow-up cannot be graded: no study date falls inside a protocol "
+                      "window (check the study dates)")
+        return issues
+    # The same absence seen by both engines is one issue, not two: "missing RTDOSE" from the
+    # RT chain already says what "missing at baseline: RTDOSE" would repeat.
+    rt_missing = {m.strip() for i in issues if i.startswith("missing ")
+                  for m in i[len("missing "):].split(",")}
+    # One line per modality, listing its visits: "MR missing at baseline, M3, M6, M12" is one
+    # fact to act on; four "missing at <visit>: MR" lines were the same fact, four times.
+    by_mod: Dict[str, List[str]] = {}
+    for cell in cells:
+        for it in cell.get("items") or []:
+            mod = str(it["modality"])
+            if it.get("state") == "MISSING" and mod not in rt_missing:
+                by_mod.setdefault(mod, []).append(str(cell.get("timepoint")))
+    issues.extend(f"{mod} missing at {', '.join(tps)}" for mod, tps in by_mod.items())
+    return issues
+
+
+def _issues_html(issues: List[str]) -> str:
+    if not issues:
+        return "<span class='noissue'>No issue</span>"
+    return "<ul class='issues'>" + "".join(f"<li>{_esc(i)}</li>" for i in issues) + "</ul>"
+
+
 def followup_only_patients(rows: List[dict], followup: Dict[str, dict]) -> List[str]:
     """Patients the protocol grades that the RT table has no row for.
 
@@ -425,7 +489,8 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
         fu_missing = int((fu or {}).get("n_missing", 0) or 0)
         # The filter text carries the follow-up too, so typing "M3" or "RTDOSE" finds the
         # patients missing it without a second search box over a second table.
-        ftext = " ".join([pid, r["rt_status"], r["reason"], r["action"],
+        issues = patient_issues(r, fu)
+        ftext = " ".join([pid, r["rt_status"], " ".join(issues),
                           "fragmented" if r["fragmented"] else "", fu_text]).lower()
         body.append(
             f"<tr class='prow{' has-detail' if has_detail else ''}' "
@@ -440,8 +505,8 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
             f"<td class='c-fu' data-export=\"{_esc(fu_text)}\">"
             f"{followup_inline_html(fu, timepoints) if fu else '<span class=dim>—</span>'}"
             f"{('<div class=c-fustat>' + followup_status_html(fu) + '</div>') if fu else ''}</td>"
-            f"<td class='c-reason'>{_esc(r['reason']) or '<span class=dim>—</span>'}</td>"
-            f"<td class='c-action'>{_esc(r['action']) or '<span class=dim>—</span>'}</td>"
+            f"<td class='c-reason' data-export=\"{_esc('; '.join(issues))}\">"
+            f"{_issues_html(issues)}</td>"
             "</tr>"
         )
         if has_detail:
@@ -500,20 +565,20 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
                 f"<span class='dm-body'>"
                 f"{_presence_strip_html(r['chain'], r['targets'], detailed=True)}</span></div>"
                 f"{fu_block}"
-                f"<div class='detail-meta issue'><b>Issue</b>"
-                f"<span class='dm-body'>{_esc(r['reason']) or '—'}</span></div>"
-                f"<div class='detail-meta act'><b>Recommended action</b>"
-                f"<span class='dm-body'>{_esc(r['action']) or '—'}</span></div>"
+                f"<div class='detail-meta wide {'issue' if issues else 'act'}'><b>Issues</b>"
+                f"<span class='dm-body'>"
+                f"{_issues_html(issues) if issues else '<span class=noissue>No issue: the RT chain and the protocol follow-up are both complete.</span>'}"
+                f"</span></div>"
                 "</div>"
             )
             body.append(
-                f"<tr class='drow' data-detail-for='{i}' hidden><td colspan='7'>"
+                f"<tr class='drow' data-detail-for='{i}' hidden><td colspan='6'>"
                 f"<div class='detail'>{recap}<div class='detail-title'>"
                 f"Per-study findings — {_esc(pid)}</div>{''.join(detail_html)}</div>"
                 "</td></tr>"
             )
     rows_html = "".join(body) or (
-        "<tr><td colspan='7' class='dim' style='text-align:center;padding:24px'>"
+        "<tr><td colspan='6' class='dim' style='text-align:center;padding:24px'>"
         "no patients</td></tr>")
     orphans = followup_only_patients(rows, followup)
     orphan_note = ""
@@ -537,9 +602,8 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
     <th class="sortable" data-key="pid" data-type="text">Patient</th>
     <th class="sortable" data-key="status" data-type="text">Verdict</th>
     <th>RT chain</th>
-    <th class="sortable num" data-key="missing" data-type="num">Protocol follow-up</th>
-    <th>Issue</th>
-    <th>Action</th>
+    <th class="sortable" data-key="missing" data-type="num">Protocol follow-up</th>
+    <th>Issues</th>
   </tr></thead>
   <tbody>{rows_html}</tbody>
 </table>"""
@@ -725,8 +789,11 @@ main{max-width:1240px;margin:0 auto;padding:28px 30px 52px}
 .prow.open:hover{background:var(--accent-soft)}
 .c-caret{width:22px;color:var(--accent);text-align:center;font-size:11px}
 .c-pid{font-family:var(--mono);font-weight:650;color:var(--ink)}
-.c-reason{color:var(--muted);font-size:12.5px;max-width:30ch}
-.c-action{color:var(--text);font-size:12.5px;max-width:28ch}
+.c-reason{color:var(--text);font-size:12.5px;max-width:34ch}
+.issues{margin:0;padding-left:15px;line-height:1.5}
+.issues li::marker{color:var(--incomplete)}
+.detail-meta .issues{padding-left:17px}
+.noissue{color:var(--ok);font-weight:600;font-size:12.5px}
 
 /* ---- verdict tag: a lit pill, the dot glows its own verdict ---- */
 .pill{
