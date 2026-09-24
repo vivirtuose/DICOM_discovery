@@ -59,6 +59,24 @@ def extraction_date(manifest: Optional[dict]) -> Optional[datetime.date]:
         return None
 
 
+def run_tag(manifest: Optional[dict]) -> str:
+    """A filename-safe tag naming the run: last folder of the scanned root + index time.
+
+    Two exports from two cohorts, or from one cohort on two days, used to both be called
+    rt_integrity.csv - the second download silently became "rt_integrity (1).csv" and the
+    file no longer said what it was. ``COHORT_BRAIN_20260924-1215`` does.
+    """
+    import re
+
+    manifest = manifest or {}
+    root = str(manifest.get("root", "") or "").replace("\\", "/").rstrip("/")
+    name = root.rsplit("/", 1)[-1] if root else ""
+    name = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_")[:40] or "cohort"
+    stamp = re.sub(r"[^0-9T]", "", str(manifest.get("generated_utc", "") or ""))[:13]
+    stamp = stamp.replace("T", "-") if len(stamp) >= 13 else stamp.replace("T", "")
+    return f"{name}_{stamp}" if stamp else name
+
+
 def _iso(d: Optional[datetime.date]) -> Optional[str]:
     return d.isoformat() if d else None
 

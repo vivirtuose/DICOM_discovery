@@ -32,7 +32,13 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from .cohort_export import PRESENCE_COLUMNS, missing_due, patient_timing, presence_long
+from .cohort_export import (
+    PRESENCE_COLUMNS,
+    missing_due,
+    patient_timing,
+    presence_long,
+    run_tag,
+)
 from .completeness import (
     Protocol,
     completeness_gaps,
@@ -702,6 +708,13 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
           title="One row per patient: verdicts, dates, counts">Export patients (CSV)</button>
   <button type="button" class="btn" id="presence-export"
           title="One row per patient x visit x modality, with a 0/1 presence outcome - for statistics">Export presence (CSV)</button>
+  <label class="csvfmt" title="Excel in French and most European languages expects ';' between columns and a decimal comma; pandas and R expect ',' and a decimal point.">
+    CSV for
+    <select id="csv-format" class="filter csvsel" aria-label="CSV format">
+      <option value="excel">Excel (Europe) - ; separator</option>
+      <option value="standard">pandas / R - , separator</option>
+    </select>
+  </label>
   <span class="hint">Click a row marked <span class="cue">▸</span> to open its findings.</span>
 </div>
 <table class="grid" id="rt-table">
@@ -1054,6 +1067,8 @@ footer b{color:var(--muted)}
   border-radius:var(--radius-sm);padding:10px 13px;margin:0 0 14px;font-size:12px;
   color:var(--text);line-height:1.6}
 .orphan-note b{color:var(--warn)}
+.csvfmt{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+.csvsel{min-width:0;padding:6px 9px;font-size:12.5px}
 """
 
 
@@ -1216,12 +1231,30 @@ def _script() -> str:
   }
   // The integrity export is built from the tidy payload, not scraped from the display: one
   // row per patient currently shown (the filter applies), one typed variable per column.
-  function csvCell(v){
+  // Separator and decimal mark follow the chosen format. Excel in a comma-decimal locale
+  // reads ',' as part of a number, put every field of a comma-separated file in column A,
+  // and turned a value like 12.5 into a date. That format writes ';' and '12,5' - exactly
+  // what that Excel writes itself; the other stays the plain ','/'.' pandas and R expect.
+  function csvCell(v, sep, dec){
+    sep = sep || ','; dec = dec || '.';
     if(v === null || v === undefined) return '';
     if(v === true) return 'true';
     if(v === false) return 'false';
-    var t = String(v);
-    return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+    var t = (typeof v === 'number' && dec !== '.') ? String(v).replace('.', dec) : String(v);
+    return (t.indexOf(sep) !== -1 || /["\r\n]/.test(t)) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  }
+  var csvSel = document.getElementById('csv-format');
+  if(csvSel){
+    // Default from the reader's own locale: decimal comma -> the Excel (Europe) format.
+    var commaDecimal = (1.5).toLocaleString().indexOf(',') !== -1;
+    csvSel.value = commaDecimal ? 'excel' : 'standard';
+  }
+  function csvDialect(){
+    return (csvSel && csvSel.value === 'excel') ? {sep:';', dec:','} : {sep:',', dec:'.'};
+  }
+  function runFile(kind){
+    var run = document.body.getAttribute('data-run') || 'cohort';
+    return run + '_' + kind + '.csv';
   }
   function exportTidy(filename, dataId){
     var node = document.getElementById(dataId || 'rt-data'), table = document.getElementById('rt-table');
@@ -1230,10 +1263,11 @@ def _script() -> str:
     table.querySelectorAll('tbody tr.prow').forEach(function(tr){
       if(!tr.hidden) shown[tr.getAttribute('data-pid')] = true;
     });
-    var lines = [data.columns.join(',')];
+    var d = csvDialect();
+    var lines = [data.columns.join(d.sep)];
     data.records.forEach(function(rec){
       if(!shown[rec.patient_id]) return;
-      lines.push(data.columns.map(function(c){ return csvCell(rec[c]); }).join(','));
+      lines.push(data.columns.map(function(c){ return csvCell(rec[c], d.sep, d.dec); }).join(d.sep));
     });
     // UTF-8 BOM so Excel reads accents; pandas and R strip it on read.
     var blob = new Blob(['\ufeff' + lines.join('\n') + '\n'], {type:'text/csv;charset=utf-8;'});
@@ -1244,9 +1278,9 @@ def _script() -> str:
     setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
   }
   var rtExp = document.getElementById('rt-export');
-  if(rtExp) rtExp.addEventListener('click', function(){ exportTidy('rt_integrity.csv', 'rt-data'); });
+  if(rtExp) rtExp.addEventListener('click', function(){ exportTidy(runFile('patients'), 'rt-data'); });
   var prExp = document.getElementById('presence-export');
-  if(prExp) prExp.addEventListener('click', function(){ exportTidy('presence_long.csv', 'presence-data'); });
+  if(prExp) prExp.addEventListener('click', function(){ exportTidy(runFile('presence'), 'presence-data'); });
 
   // ---- cohort map: narrow the plotted points to a set of patients ----
   var MAP_ORIG = null, MAP_ALLPIDS = null;
@@ -1364,7 +1398,7 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_esc(title)}</title>
 <style>{_styles()}{completeness_styles()}{overview_styles()}</style>
-</head><body>
+</head><body data-run="{_esc(run_tag(manifest))}">
 {_topbar_html(manifest)}
 <main>
   {_kpi_html(kpis)}

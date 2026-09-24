@@ -8,6 +8,7 @@ HTML rendering (Task 2) and CLI wiring (Task 3) are out of scope here.
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -759,7 +760,7 @@ def test_the_integrity_csv_loads_as_a_typed_tidy_table(rendered_html, tmp_path):
     html_text, _ = rendered_html
     payload = re.search(r'<script type="application/json" id="rt-data">(.*?)</script>',
                         html_text, re.S).group(1)
-    cell_fn = re.search(r"function csvCell\(v\)\{.*?\n  \}", html_text, re.S).group(0)
+    cell_fn = re.search(r"function csvCell\([^)]*\)\{.*?\n  \}", html_text, re.S).group(0)
     js = (cell_fn + "\nconst data = " + payload + ";\n"
           "const lines=[data.columns.join(',')];\n"
           "data.records.forEach(r=>lines.push(data.columns.map(c=>csvCell(r[c])).join(',')));\n"
@@ -804,7 +805,7 @@ def test_the_presence_csv_loads_as_a_long_typed_table(rendered_html, tmp_path):
     assert "id='presence-export'" in html_text or 'id="presence-export"' in html_text
     payload = re.search(r'<script type="application/json" id="presence-data">(.*?)</script>',
                         html_text, re.S).group(1)
-    cell_fn = re.search(r"function csvCell\(v\)\{.*?\n  \}", html_text, re.S).group(0)
+    cell_fn = re.search(r"function csvCell\([^)]*\)\{.*?\n  \}", html_text, re.S).group(0)
     js = (cell_fn + "\nconst data = " + payload + ";\n"
           "const lines=[data.columns.join(',')];\n"
           "data.records.forEach(r=>lines.push(data.columns.map(c=>csvCell(r[c])).join(',')));\n"
@@ -821,3 +822,75 @@ def test_the_presence_csv_loads_as_a_long_typed_table(rendered_html, tmp_path):
     assert df["window_closed"].dropna().isin([True, False]).all()
     assert str(df["n_files"].dtype).startswith("int")
     assert pd.api.types.is_datetime64_any_dtype(df["baseline_date"])
+
+
+
+def _node_or_skip():
+    import shutil
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is needed to run the page's own scripts")
+    return node
+
+
+def test_every_page_script_is_valid_javascript(tmp_path):
+    """The scripts are Python string literals: one escape interpreted too early put a raw
+    line break inside a JS string and would have silently killed the whole page's script."""
+    import subprocess
+
+    from DICOM_discovery.report_cohort import _script
+    from DICOM_discovery.report_completeness import completeness_script
+    from DICOM_discovery.report_overview import overview_script
+    node = _node_or_skip()
+    for name, js in (("cohort", _script()), ("completeness", completeness_script()),
+                     ("overview", overview_script())):
+        f = tmp_path / f"{name}.js"
+        f.write_text(js, encoding="utf-8")
+        subprocess.run([node, "--check", str(f)], check=True, capture_output=True)
+
+
+def test_excel_format_uses_semicolons_and_a_decimal_comma(rendered_html, tmp_path):
+    """French Excel put every field of a comma-separated file in column A, and would read
+    12.5 as a date. The Excel format writes ';' and '12,5'; pandas reads it back with
+    sep=';', decimal=','."""
+    import io
+    import re
+    import subprocess
+
+    node = _node_or_skip()
+    html_text, _ = rendered_html
+    payload = re.search(r'<script type="application/json" id="rt-data">(.*?)</script>',
+                        html_text, re.S).group(1)
+    cell_fn = re.search(r"function csvCell\([^)]*\)\{.*?\n  \}", html_text, re.S).group(0)
+    js = (cell_fn + "\nconst data = " + payload + ";\n"
+          "const lines=[data.columns.join(';')];\n"
+          "data.records.forEach(r=>lines.push(data.columns.map(c=>csvCell(r[c], ';', ',')).join(';')));\n"
+          "process.stdout.write(lines.join(String.fromCharCode(10)));")
+    f = tmp_path / "excel.js"
+    f.write_text(js, encoding="utf-8")
+    csv = subprocess.run([node, str(f)], capture_output=True, text=True, encoding="utf-8",
+                         check=True).stdout
+    header = csv.splitlines()[0]
+    assert ";" in header and "," not in header
+    df = pd.read_csv(io.StringIO(csv), sep=";", decimal=",")
+    assert df.shape[1] == len(header.split(";")) > 20, "fields did not split into columns"
+    assert df["fu_pct_complete"].dtype == float
+    assert "37,5" in csv or "62,5" in csv or "87,5" in csv
+
+
+def test_exports_are_named_after_the_run():
+    """rt_integrity.csv twice became 'rt_integrity (1).csv': the file no longer said which
+    cohort or which day it came from."""
+    from DICOM_discovery.cohort_export import run_tag
+    assert run_tag({"root": "\\nas01\radiotherapy\COHORT_BRAIN",
+                    "generated_utc": "2026-09-24T12:15:30Z"}) == "COHORT_BRAIN_20260924-1215"
+    assert run_tag({"root": "/data/My Cohort (v2)/",
+                    "generated_utc": "2026-09-24T12:15:30Z"}) == "My_Cohort_v2_20260924-1215"
+    assert run_tag({}) == "cohort"
+
+
+def test_the_report_carries_its_run_tag_and_a_format_choice(rendered_html):
+    html_text, _ = rendered_html
+    assert re.search(r'<body data-run="[A-Za-z0-9_-]+_\d{8}-\d{4}">', html_text)
+    assert 'id="csv-format"' in html_text
+    assert "runFile('patients')" in html_text and "runFile('presence')" in html_text

@@ -30,6 +30,7 @@ from __future__ import annotations
 import html
 from typing import Dict, List, Optional
 
+from .cohort_export import run_tag as _run_tag
 from .completeness import Protocol
 
 RUO_TEXT = "Research Use Only - not a medical device."
@@ -721,13 +722,17 @@ def completeness_script() -> str:
         entries.push({patient: tr.getAttribute('data-pid') || '', chips: chips});
       });
       var rows = compCsvRows(entries);
+      // ';' where the reader's Excel uses a decimal comma, ',' elsewhere - a comma-separated
+      // file opened in French Excel lands entirely in column A.
+      var SEP = (1.5).toLocaleString().indexOf(',') !== -1 ? ';' : ',';
       var csv = rows.map(function(r){
-        return r.map(function(c){ return '"' + String(c).replace(/"/g,'""') + '"'; }).join(',');
+        return r.map(function(c){ return '"' + String(c).replace(/"/g,'""') + '"'; }).join(SEP);
       }).join('\n');
-      var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      var blob = new Blob([String.fromCharCode(0xFEFF) + csv + String.fromCharCode(10)], {type:'text/csv;charset=utf-8;'});
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
-      a.href = url; a.download = 'completeness.csv'; a.rel = 'noopener';
+      a.href = url; a.rel = 'noopener';
+      a.download = (document.body.getAttribute('data-run') || 'cohort') + '_completeness.csv';
       document.body.appendChild(a); a.click();
       setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
     });
@@ -765,7 +770,7 @@ def completeness_page_html(grid: List[dict], kpis: dict, protocol: Protocol,
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_esc(title)}</title>
 <style>{_styles()}{completeness_styles()}</style>
-</head><body>
+</head><body data-run="{_esc(_run_tag(manifest))}">
 <header class="topbar">
   <div class="brand">
     <span class="title">DICOM<span class="thin">_discovery</span></span>
