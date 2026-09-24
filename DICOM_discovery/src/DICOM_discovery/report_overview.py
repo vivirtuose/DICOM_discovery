@@ -333,9 +333,10 @@ _FEATURES = [
     ("Grades longitudinal follow-up",
      "Places each study on a protocol timeline from its own StudyDate, then says which "
      "timepoint and modality the cohort is missing, and for whom."),
-    ("Answers in one self-contained file",
-     "This page carries its own styles and scripts. It opens by double-click on an "
-     "air-gapped machine, with CSV and JSON exports beside it for anything downstream."),
+    ("Delivers one report file",
+     "Everything is in this single file: double-click to open it on any hospital computer, "
+     "with no installation and no internet connection. Tables can be exported to CSV and "
+     "opened in Excel."),
 ]
 
 
