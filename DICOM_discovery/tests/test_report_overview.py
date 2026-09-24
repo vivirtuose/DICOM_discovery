@@ -117,7 +117,7 @@ def test_the_page_opens_by_saying_what_the_tool_does():
     html = overview_section_html(ov)
     assert html.index("What DICOM_discovery does") < html.index("What was scanned")
     assert html.count("class='ovfeat'") == 4
-    assert "headers only" in html and "not a medical device" in html
+    assert "never the images" in html and "not a medical device" in html
     assert "/nas/cohort" in html
 
 

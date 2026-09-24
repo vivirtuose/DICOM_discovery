@@ -323,16 +323,21 @@ def _column_chart(buckets: List[dict], unit: str) -> str:
 # --------------------------------------------------------------------------- #
 # Blocks
 # --------------------------------------------------------------------------- #
+#: Written for the physician reading the report, not for the engineer who installed it:
+#: radiotherapy vocabulary (contours, treatment plan, dose, follow-up visits) and no computing
+#: terms. Only the descriptive details (image headers) that a reader needs to trust the page.
 _FEATURES = [
-    ("Indexes any DICOM tree",
-     "Walks a folder, a share or a NAS mount and reads headers only - never pixel data. "
-     "Nothing is moved, renamed or modified."),
-    ("Grades the radiotherapy chain",
-     "CT or MR to structures to plan to dose, all in one frame of reference, with structure "
-     "names checked against the TG-263 convention. One verdict per patient."),
-    ("Grades longitudinal follow-up",
-     "Places each study on a protocol timeline from its own StudyDate, then says which "
-     "timepoint and modality the cohort is missing, and for whom."),
+    ("Reviews your imaging archive",
+     "Scans the folder where your patients' imaging is stored and reads only the "
+     "descriptive information of each exam (patient, date, type) - never the images "
+     "themselves. Nothing is moved, renamed or modified."),
+    ("Checks each radiotherapy record",
+     "For each patient: is there a planning CT or MR, the contours, the treatment plan and "
+     "the dose - and do they all belong together? Contour names are checked against the "
+     "international naming standard (TG-263). One verdict per patient."),
+    ("Checks follow-up against the protocol",
+     "Places each exam on the patient's follow-up calendar from its date, then shows which "
+     "visit and which exam are missing, and for which patients."),
     ("Delivers one report file",
      "Everything is in this single file: double-click to open it on any hospital computer, "
      "with no installation and no internet connection. Tables can be exported to CSV and "
@@ -368,7 +373,7 @@ def _scanned_block(ov: dict) -> str:
         _stat(_num(ov["n_files_seen"]), "files walked", count=ov["n_files_seen"],
               note="Every file the scan opened a directory entry for, DICOM or not."),
         _stat(_num(ov["n_files"]), "DICOM files indexed", count=ov["n_files"],
-              note="Of those, the ones that are DICOM and were read - headers only."),
+              note="Of those, the medical imaging files that were read - descriptive information only, never the images."),
         _stat(_num(ov["n_rows"]), "series and RT objects", count=ov["n_rows"],
               note="The rows this report works on: an image series counts once however many "
                    "slices it holds."),
