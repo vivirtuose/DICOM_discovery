@@ -32,6 +32,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from .cohort_export import PRESENCE_COLUMNS, missing_due, patient_timing, presence_long
 from .completeness import (
     Protocol,
     completeness_gaps,
@@ -468,7 +469,8 @@ def _followup_status(fu: Optional[dict]) -> str:
 
 
 def export_table(rows: List[dict], followup: Dict[str, dict],
-                 timepoints: List[str]) -> Tuple[List[str], List[dict]]:
+                 timepoints: List[str], timing: Optional[Dict[str, dict]] = None,
+                 due: Optional[Dict[str, int]] = None) -> Tuple[List[str], List[dict]]:
     """The integrity queue as a tidy table: one row per patient, one variable per column.
 
     The CSV used to be scraped from what the page displays - glyph strips ("✓CT✓STR—DOSE"),
@@ -482,8 +484,14 @@ def export_table(rows: List[dict], followup: Dict[str, dict],
       (nothing expected, or ungradeable), never a misleading 100;
     * one ``fu_<timepoint>_<modality>`` column per pair the protocol grades, holding
       PRESENT / MISSING / EXTRA / UNMAPPED, empty when nothing is expected there;
-    * ``issues`` as the only free-text column, ``;``-separated, with ``n_issues`` beside it.
+    * ``issues`` as the only free-text column, ``;``-separated, with ``n_issues`` beside it;
+    * with ``timing``: inclusion and last-exam dates, follow-up length, where the patient id
+      came from, undated exams and exams outside every window - and ``fu_n_missing_due``,
+      the missing count restricted to visits whose window had closed at extraction, which is
+      the one to compute missingness rates on.
     """
+    timing = timing or {}
+    due = due or {}
     pairs: List[Tuple[str, str]] = []
     for tp in timepoints:
         mods = set()
@@ -493,11 +501,14 @@ def export_table(rows: List[dict], followup: Dict[str, dict],
                     mods.update(str(it["modality"]) for it in cell.get("items") or [])
         pairs.extend((tp, m) for m in sorted(mods))
 
-    columns = ["patient_id", "rt_status", "fragmented",
+    columns = ["patient_id", "baseline_date", "last_study_date", "followup_days",
+               "patient_id_source", "n_studies_undated", "n_studies_outside_windows",
+               "rt_status", "fragmented",
                "has_CT", "has_RTSTRUCT", "has_RTPLAN", "has_RTDOSE",
                "has_GTV", "has_CTV", "has_PTV",
                "n_studies", "n_rt_studies", "n_roi_nonstandard",
-               "fu_status", "fu_n_expected", "fu_n_present", "fu_n_missing", "fu_pct_complete"]
+               "fu_status", "fu_n_expected", "fu_n_present", "fu_n_missing",
+               "fu_n_missing_due", "fu_pct_complete"]
     columns += [f"fu_{tp}_{mod}" for tp, mod in pairs]
     columns += ["n_issues", "issues"]
 
@@ -507,6 +518,10 @@ def export_table(rows: List[dict], followup: Dict[str, dict],
         fu = followup.get(pid)
         status = _followup_status(fu)
         rec = {"patient_id": pid, "rt_status": r["rt_status"], "fragmented": r["fragmented"]}
+        t = timing.get(pid, {})
+        for key in ("baseline_date", "last_study_date", "followup_days", "patient_id_source",
+                    "n_studies_undated", "n_studies_outside_windows"):
+            rec[key] = t.get(key)
         for (key, _label), present in zip(_CHAIN, r["chain"]):
             rec[key] = present
         for t in ("GTV", "CTV", "PTV"):
@@ -517,6 +532,7 @@ def export_table(rows: List[dict], followup: Dict[str, dict],
         rec["fu_n_expected"] = int(fu["n_expected"]) if graded else None
         rec["fu_n_present"] = int(fu["n_present"]) if graded else None
         rec["fu_n_missing"] = int(fu["n_missing"]) if graded else None
+        rec["fu_n_missing_due"] = due.get(pid, 0) if graded else None
         rec["fu_pct_complete"] = round(float(fu["pct_complete"]), 1) if graded else None
         states = {}
         for cell in (fu or {}).get("cells") or []:
@@ -550,7 +566,9 @@ def followup_only_patients(rows: List[dict], followup: Dict[str, dict]) -> List[
 
 
 def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
-                   followup: Dict[str, dict], timepoints: List[str]) -> str:
+                   followup: Dict[str, dict], timepoints: List[str],
+                   timing: Optional[Dict[str, dict]] = None,
+                   presence: Optional[List[dict]] = None) -> str:
     """The cohort's one work queue: RT-chain integrity and protocol follow-up on one row.
 
     These were two tabs. They are two verdicts about the same patient, and splitting them made
@@ -673,12 +691,17 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
             f"have no row below</b> - the RT index does not list them: "
             f"<span class='mono'>{shown}{more}</span>. Their follow-up is in the gap table "
             f"above; their RT chain was never assessed.</p>")
-    columns, records = export_table(rows, followup, timepoints)
+    presence = presence or []
+    columns, records = export_table(rows, followup, timepoints, timing, missing_due(presence))
     return f"""{orphan_note}<script type="application/json" id="rt-data">{_export_json(columns, records)}</script>
+<script type="application/json" id="presence-data">{_export_json(PRESENCE_COLUMNS, presence)}</script>
 <div class="toolbar">
   <input type="search" id="rt-filter" class="filter" placeholder="Filter patients…"
          aria-label="filter RT table">
-  <button type="button" class="btn" id="rt-export">Export CSV</button>
+  <button type="button" class="btn" id="rt-export"
+          title="One row per patient: verdicts, dates, counts">Export patients (CSV)</button>
+  <button type="button" class="btn" id="presence-export"
+          title="One row per patient x visit x modality, with a 0/1 presence outcome - for statistics">Export presence (CSV)</button>
   <span class="hint">Click a row marked <span class="cue">▸</span> to open its findings.</span>
 </div>
 <table class="grid" id="rt-table">
@@ -1200,8 +1223,8 @@ def _script() -> str:
     var t = String(v);
     return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
   }
-  function exportTidy(filename){
-    var node = document.getElementById('rt-data'), table = document.getElementById('rt-table');
+  function exportTidy(filename, dataId){
+    var node = document.getElementById(dataId || 'rt-data'), table = document.getElementById('rt-table');
     if(!node || !table){ exportCsv('rt-table', filename); return; }
     var data = JSON.parse(node.textContent), shown = {};
     table.querySelectorAll('tbody tr.prow').forEach(function(tr){
@@ -1221,7 +1244,9 @@ def _script() -> str:
     setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
   }
   var rtExp = document.getElementById('rt-export');
-  if(rtExp) rtExp.addEventListener('click', function(){ exportTidy('rt_integrity.csv'); });
+  if(rtExp) rtExp.addEventListener('click', function(){ exportTidy('rt_integrity.csv', 'rt-data'); });
+  var prExp = document.getElementById('presence-export');
+  if(prExp) prExp.addEventListener('click', function(){ exportTidy('presence_long.csv', 'presence-data'); });
 
   // ---- cohort map: narrow the plotted points to a set of patients ----
   var MAP_ORIG = null, MAP_ALLPIDS = null;
@@ -1323,6 +1348,10 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
     comp_gaps = completeness_gaps(comp_long)
     followup = {str(p["patient"]): p for p in comp_grid}
     timepoints = list(protocol.timepoints)
+    # Analysis-ready exports: patient dates and the long presence table, so a statistician
+    # can tell a missing exam from one that was not yet due.
+    timing = patient_timing(table, protocol)
+    presence = presence_long(table, comp_long, protocol, manifest)
 
     # The overview opens the report. A reader who lands on a work queue has no way to check
     # that the queue is about the cohort they meant; this tab answers that first, and grades
@@ -1360,7 +1389,7 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
         batch that closes the largest hole.</p>
       {gap_table_html(comp_gaps)}
     </section>
-    {_rt_table_html(rt_rows, findings, followup, timepoints)}
+    {_rt_table_html(rt_rows, findings, followup, timepoints, timing, presence)}
   </section>
 
   <section class="panel" role="tabpanel" data-panel="map" hidden>

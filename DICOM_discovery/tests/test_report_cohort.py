@@ -787,3 +787,37 @@ def test_the_integrity_csv_loads_as_a_typed_tidy_table(rendered_html, tmp_path):
     assert not any(ch in csv for ch in "✓✗—"), "a display glyph reached the CSV"
     assert (df["n_issues"] == df["issues"].fillna("").map(
         lambda s: len([x for x in s.split("; ") if x]))).all()
+
+
+def test_the_presence_csv_loads_as_a_long_typed_table(rendered_html, tmp_path):
+    """The second export: one row per patient x visit x modality, a 0/1 outcome and a
+    window_closed flag - run through the page's own CSV code and read back with pandas."""
+    import io
+    import re
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is needed to run the page's own export code")
+    html_text, _ = rendered_html
+    assert "id='presence-export'" in html_text or 'id="presence-export"' in html_text
+    payload = re.search(r'<script type="application/json" id="presence-data">(.*?)</script>',
+                        html_text, re.S).group(1)
+    cell_fn = re.search(r"function csvCell\(v\)\{.*?\n  \}", html_text, re.S).group(0)
+    js = (cell_fn + "\nconst data = " + payload + ";\n"
+          "const lines=[data.columns.join(',')];\n"
+          "data.records.forEach(r=>lines.push(data.columns.map(c=>csvCell(r[c])).join(',')));\n"
+          "process.stdout.write(lines.join(String.fromCharCode(10))+String.fromCharCode(10));")
+    script = tmp_path / "presence.js"
+    script.write_text(js, encoding="utf-8")
+    csv = subprocess.run([node, str(script)], capture_output=True, text=True,
+                         encoding="utf-8", check=True).stdout
+    df = pd.read_csv(io.StringIO(csv), parse_dates=["baseline_date", "study_date",
+                                                    "window_end_date", "extraction_date"])
+    assert len(df) > 0
+    assert not df.duplicated(["patient_id", "timepoint", "modality"]).any()
+    assert set(df["present"].dropna().unique()) <= {0, 1}
+    assert df["window_closed"].dropna().isin([True, False]).all()
+    assert str(df["n_files"].dtype).startswith("int")
+    assert pd.api.types.is_datetime64_any_dtype(df["baseline_date"])
