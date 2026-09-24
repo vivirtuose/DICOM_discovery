@@ -262,8 +262,10 @@ def test_the_dial_rests_at_its_final_geometry():
     assert "both" in pw, "the sweep must fill backwards so the delay shows an empty wedge"
     sweep = css.split("@keyframes pwsweep{")[1].split("}}")[0]
     assert sweep.startswith("from{") and "to{" not in sweep
-    scan = css.split(".pscan{")[1].split("}")[0]
-    assert "opacity:0" in scan, "the scanner arm is a transient; at rest it must be gone"
+    # No decorative instrument: nothing on the dial keeps moving once it is drawn.
+    assert "infinite" not in css
+    html = _dial({"OK": 3, "WARN": 1})
+    assert "pscan" not in html and "porbit" not in html
 
 
 def test_no_dial_is_drawn_when_no_verdict_was_supplied():
@@ -293,30 +295,25 @@ def test_no_block_caps_its_own_text_short_of_the_card_edge():
 
 def test_block_headings_are_bigger_than_body_text_and_carry_colour():
     """Five blocks whose headings looked like bold body text read as one long document with
-    no landmarks. The gradient is clipped to a span around the words: painted on the flex
-    heading itself it would span the card and the words would only ever show its first few
-    percent."""
+    no landmarks. Colour and size make them landmarks; a gradient or glow would make them
+    decoration, which a clinical page cannot afford."""
     css = overview_styles()
     heading = css.split(".ovh{")[1].split("}")[0]
-    assert "font-size:18px" in heading
-    words = css.split(".ovh-t{")[1].split("}")[0]
-    assert "var(--grad)" in words and "background-clip:text" in words
+    assert "font-size:18px" in heading and "var(--accent-2)" in heading
+    assert "background-clip:text" not in css and "text-shadow" not in css
     html = overview_section_html(cohort_overview(_table({"patient_id": "P1"}), {}))
     assert "<h3 class='ovh'><span class='ovh-t'>" in html
 
 
 def test_cards_wait_for_the_reader_but_never_strand_the_page():
-    """The dial sits below the fold; playing its sweep on load means nobody sees it. Cards are
-    held until they scroll in - but only when the script can also release them, and never on
-    paper, so no path leaves a card paused on its empty first frame."""
+    """Cards are held until they scroll in - but only when the script can also release them,
+    never on paper, and never forever: the observer failed to fire in a backgrounded pane
+    once, so a hard timer releases every card regardless."""
     css, js = overview_styles(), overview_script()
     assert ".ovarmed .ovblock:not(.in)" in css and "animation-play-state:paused" in css
     arm = js.index("classList.add('ovarmed')")
-    assert js.rfind("'IntersectionObserver' in window", 0, arm) != -1, (
-        "the page must only be armed where IntersectionObserver can disarm it")
+    assert js.rfind("'IntersectionObserver' in window", 0, arm) != -1
     assert "@media print" in css
-    # The observer can fail to fire (it did, in a backgrounded pane): a hard timer releases
-    # every card regardless, so an armed page can never end blank.
     assert "setTimeout(function(){ cards.forEach(release); }" in js
     assert "getBoundingClientRect" in js
 
@@ -324,5 +321,4 @@ def test_cards_wait_for_the_reader_but_never_strand_the_page():
 def test_the_count_up_has_a_floor_under_it():
     """requestAnimationFrame stops in a background tab; a figure frozen mid-count is a wrong
     number on screen. A timer puts the true value back regardless."""
-    js = overview_script()
-    assert "el.textContent = final; }, wait + DUR" in js
+    assert "el.textContent = final; }, wait + DUR" in overview_script()

@@ -42,12 +42,12 @@ _MOD_ORDER = {"CT": 0, "MR": 1, "PT": 2, "RTSTRUCT": 3, "RTPLAN": 4, "RTDOSE": 5
 
 #: One hue per modality - THE palette: report_cohort imports it for the cohort map, so a
 #: reader who learns CT is blue on the overview finds it blue on the map. Chosen to stay clear
-#: of the four verdict hues (emerald, amber, coral, slate), so a modality is never mistaken
+#: of the four verdict hues (green, ochre, brick, slate), so a modality is never mistaken
 #: for a verdict on a page that shows both.
 MOD_COLORS = {
-    "CT": "#60a5fa", "MR": "#a78bfa", "PT": "#f472b6",
-    "RTSTRUCT": "#fb923c", "RTPLAN": "#22d3ee", "RTDOSE": "#e879f9",
-    "REG": "#818cf8", "SEG": "#a3e635", "SR": "#cbd5e1", "OT": "#64748b",
+    "CT": "#2f6fb0", "MR": "#6a4fa3", "PT": "#a8457a",
+    "RTSTRUCT": "#c0681a", "RTPLAN": "#1f8585", "RTDOSE": "#7a6a1c",
+    "REG": "#56778f", "SEG": "#6f8a2a", "SR": "#8a97a6", "OT": "#6b7785",
 }
 _MOD_COLOR = MOD_COLORS
 _MOD_FALLBACK = "#64748b"
@@ -468,9 +468,9 @@ _PIE_BOX = 240
 _PIE_C = 120.0            # centre
 _PIE_R = 82.0             # outer radius of the wedges
 _PIE_HUB = 29.0           # the glass hub that carries the total
-_PIE_POP = 7.0            # how far a wedge lifts out when hovered
-_PIE_SWEEP_S = 1.15       # one full turn of the scanner arm, in seconds
-_PIE_SWEEP_T0 = 0.35      # when the arm starts, after the block has risen into place
+_PIE_POP = 4.0            # how far a wedge lifts out when hovered
+_PIE_SWEEP_S = 0.9        # time to draw the whole disc, clockwise, in seconds
+_PIE_SWEEP_T0 = 0.25      # when drawing starts, once the card is in place
 
 #: What each RT verdict means in one line, so a slice is never just a colour with a code.
 _VERDICT_NOTE = {
@@ -494,17 +494,17 @@ def _pie_point(turn: float, radius: float) -> Tuple[float, float]:
 
 
 def _verdict_pie_block(ov: dict) -> str:
-    """The RT verdict split as a swept, glass-hubbed pie, under what was scanned.
+    """The RT verdict split as a pie with a central total, under what was scanned.
 
     Deliberately a pie and not a fourth row of counts: the question it answers is "how much of
     this cohort is usable?", which is a proportion. The counts sit beside it in the legend,
     because a proportion is what you see and a count is what you quote.
 
-    The motion is one idea, not an effect per element: a scanner arm turns once and each
-    wedge is painted exactly while the arm crosses it, so the order of appearance *is* the
-    order around the dial. Everything that animates has its final geometry as its resting
-    style, and the animation only supplies the starting frame - with motion reduced or CSS
-    animations unsupported, the pie is simply there, complete and correct.
+    The only motion is the disc drawing itself once, clockwise, each wedge in turn - enough
+    to show that the parts add up to the whole, and nothing that keeps moving afterwards.
+    Everything that animates has its final geometry as its resting style, and the animation
+    only supplies the starting frame - with motion reduced or CSS animations unsupported,
+    the pie is simply there, complete and correct.
     """
     import math
 
@@ -528,13 +528,13 @@ def _verdict_pie_block(ov: dict) -> str:
         dx = _PIE_POP * math.cos(2 * math.pi * mid)
         dy = _PIE_POP * math.sin(2 * math.pi * mid)
         pct = round(100 * share)
-        # Depth without a light source: the hue deepens toward the rim and lifts toward the
-        # hub, so the disc reads as a lit lens rather than as flat paint.
+        # Flat hue, a hair lighter toward the hub so adjacent wedges of similar value still
+        # separate - print-safe, and nothing that reads as a lighting effect.
         defs.append(
             f"<radialGradient id='pg-{name}' cx='{_PIE_C}' cy='{_PIE_C}' r='{_PIE_R}' "
             f"gradientUnits='userSpaceOnUse'>"
-            f"<stop offset='0' stop-color='{color}' stop-opacity='.38'/>"
-            f"<stop offset='.55' stop-color='{color}' stop-opacity='.78'/>"
+            f"<stop offset='0' stop-color='{color}' stop-opacity='.82'/>"
+            f"<stop offset='.55' stop-color='{color}' stop-opacity='.94'/>"
             f"<stop offset='1' stop-color='{color}' stop-opacity='1'/></radialGradient>")
         wedges.append(
             f"<circle class='pw' data-v='{_esc(name)}' cx='{_PIE_C}' cy='{_PIE_C}' r='{r:.3f}' "
@@ -559,39 +559,14 @@ def _verdict_pie_block(ov: dict) -> str:
             f"<span class='pl-bar'><i></i></span></li>")
         start += share
 
-    # The dial: 40 minor ticks, 4 major ones at the quarters, an orbit that turns slowly.
-    tick_r = _PIE_R + 8
-    tick_c = 2 * math.pi * tick_r
-    orbit_r = _PIE_R + 19
-    dial = (
-        f"<circle class='pdisc' cx='{_PIE_C}' cy='{_PIE_C}' r='{_PIE_R}'/>"
-        f"<circle class='ptick' cx='{_PIE_C}' cy='{_PIE_C}' r='{tick_r}' "
-        f"stroke-dasharray='.9 {tick_c / 40 - .9:.3f}'/>"
-        f"<circle class='ptick major' cx='{_PIE_C}' cy='{_PIE_C}' r='{tick_r}' "
-        f"stroke-dasharray='1.8 {tick_c / 4 - 1.8:.3f}'/>"
-    )
-    arm_x, arm_y = _pie_point(0, _PIE_R + 3)
-    scanner = (f"<g class='pscan'><line x1='{_PIE_C}' y1='{_PIE_C}' x2='{arm_x:.2f}' "
-               f"y2='{arm_y:.2f}'/><circle cx='{arm_x:.2f}' cy='{arm_y:.2f}' r='2.6'/></g>")
-
     svg = (
         f"<svg class='ovpie' viewBox='0 0 {_PIE_BOX} {_PIE_BOX}' role='img' "
         f"aria-label='RT verdict split over {total} patients' "
         f"style='--sweep:{_PIE_SWEEP_S}s;--t0:{_PIE_SWEEP_T0}s'>"
-        "<defs>"
-        f"{''.join(defs)}"
-        "<linearGradient id='pg-halo' x1='0' y1='0' x2='1' y2='1'>"
-        "<stop offset='0' stop-color='#38bdf8'/><stop offset='.5' stop-color='#818cf8'/>"
-        "<stop offset='1' stop-color='#c084fc'/></linearGradient>"
-        f"<radialGradient id='pg-hub' cx='{_PIE_C}' cy='{_PIE_C - 10}' r='{_PIE_HUB * 1.4}' "
-        "gradientUnits='userSpaceOnUse'>"
-        "<stop offset='0' stop-color='#1d2a4a'/><stop offset='1' stop-color='#0a1122'/>"
-        "</radialGradient>"
-        "</defs>"
-        f"<circle class='porbit' cx='{_PIE_C}' cy='{_PIE_C}' r='{orbit_r}'/>"
+        f"<defs>{''.join(defs)}</defs>"
         f"<g class='pdial' transform='rotate(-90 {_PIE_C} {_PIE_C})'>"
-        f"{dial}{''.join(wedges)}{''.join(seps)}{scanner}</g>"
-        f"<circle class='phub-ring' cx='{_PIE_C}' cy='{_PIE_C}' r='{_PIE_HUB + 3.5}'/>"
+        f"<circle class='pdisc' cx='{_PIE_C}' cy='{_PIE_C}' r='{_PIE_R}'/>"
+        f"{''.join(wedges)}{''.join(seps)}</g>"
         f"<circle class='phub' cx='{_PIE_C}' cy='{_PIE_C}' r='{_PIE_HUB}'/>"
         f"<text class='ptotal' x='{_PIE_C}' y='{_PIE_C + 3}' data-count='{total}'>{_num(total)}</text>"
         f"<text class='psub' x='{_PIE_C}' y='{_PIE_C + 16}'>patients</text>"
@@ -601,7 +576,7 @@ def _verdict_pie_block(ov: dict) -> str:
     return _block(
         "RT verdicts across the cohort",
         "One verdict per patient, from the integrity tab - the same counts, drawn. Hover a "
-        "slice or a row to single it out. NO_RT is not a failure: those patients carry no "
+        "slice or a row to highlight it. NO_RT is not a failure: those patients carry no "
         "radiotherapy object at all, so there was no chain to check.",
         f"<div class='ovpie-wrap'><div class='ovpie-stage'>{svg}</div>"
         f"<ul class='pl-list'>{''.join(legend)}</ul></div>",
@@ -623,7 +598,7 @@ def overview_section_html(ov: dict) -> str:
 # Style and behaviour
 # --------------------------------------------------------------------------- #
 def overview_styles() -> str:
-    """CSS for the overview tab, in the report's Midnight Aurora language.
+    """CSS for the overview tab, in the report's clinical-navy language.
 
     One rule governs every animation here: **the resting style is the final state**. Each
     keyframe block only supplies a ``from`` frame, played with ``animation-fill-mode: both``,
@@ -631,204 +606,155 @@ def overview_styles() -> str:
     base sheet switches every animation off there), by an old browser, or by print. A chart
     that is only right once its animation has finished is a chart that is sometimes wrong.
 
-    Every reveal is one-shot, with a single, deliberate exception: the orbit ring around the
-    verdict dial turns slowly (one revolution a minute). It carries no data, it is the one
-    thing on the page that says "live instrument", and it stops under reduced motion.
+    Every reveal is one-shot and short. Nothing loops, glows or keeps moving once drawn: this
+    page is read by clinicians deciding what to chase, and motion that continues after the
+    data has arrived only competes with it.
     """
     return """
-.overview{display:flex;flex-direction:column;gap:22px}
+.overview{display:flex;flex-direction:column;gap:20px}
 
-/* ---- the card: glass on midnight, a gradient hairline along its top edge ---- */
-.ovblock{position:relative;background:var(--glass),var(--surface);border:1px solid var(--line);
-  border-radius:16px;padding:21px 23px 23px;box-shadow:var(--shadow);
-  animation:ovrise .65s cubic-bezier(.22,1,.36,1) both}
-.ovblock::before{content:"";position:absolute;left:22px;right:22px;top:-1px;height:1px;
-  background:var(--grad);opacity:.55}
+/* ---- the card ---- */
+.ovblock{position:relative;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);padding:20px 22px 22px;box-shadow:var(--shadow);
+  animation:ovrise .45s ease-out both}
 .ovblock:nth-child(1){animation-delay:.02s}
-.ovblock:nth-child(2){animation-delay:.10s}
-.ovblock:nth-child(3){animation-delay:.18s}
-.ovblock:nth-child(4){animation-delay:.26s}
-.ovblock:nth-child(5){animation-delay:.34s}
-@keyframes ovrise{from{opacity:0;transform:translateY(12px)}}
-/* Scroll-triggered choreography. The script arms the page (.ovarmed) only when it can also
-   disarm it, then releases each card (.in) as it scrolls into view - so the dial sweeps when
-   you reach it, not while you are still reading the intro. Without the script nothing is ever
-   armed and everything plays on load; either way it ends in the resting state. */
+.ovblock:nth-child(2){animation-delay:.08s}
+.ovblock:nth-child(3){animation-delay:.14s}
+.ovblock:nth-child(4){animation-delay:.20s}
+.ovblock:nth-child(5){animation-delay:.26s}
+@keyframes ovrise{from{opacity:0;transform:translateY(6px)}}
+/* Scroll-triggered reveal. The script arms the page (.ovarmed) only when it can also disarm
+   it, then releases each card (.in) as it scrolls into view. Without the script nothing is
+   ever armed and everything plays on load; either way it ends in the resting state. */
 .ovarmed .ovblock:not(.in),.ovarmed .ovblock:not(.in) *,
 .ovarmed .ovblock:not(.in) *::before{animation-play-state:paused}
 
-/* The heading carries the block: gradient words, a glowing bar in front. At body size and
-   body colour, five blocks read as one long document with no landmarks. */
-.ovh{margin:0 0 8px;font-size:18px;font-weight:750;letter-spacing:-.015em;color:var(--ink);
-  display:flex;align-items:center;gap:11px}
-.ovh::before{content:"";width:4px;height:19px;border-radius:3px;background:var(--grad);
-  box-shadow:0 0 14px rgba(56,189,248,.7);flex:none}
-.ovh-t{background:var(--grad);-webkit-background-clip:text;background-clip:text;
-  color:transparent}
-/* No max-width: a measure set in `ch` at 12px capped the lede near 500px and left every
-   block ending in a half-page of empty card. The card sets the measure. */
-.ovlede{margin:0 0 16px;font-size:12.5px;color:var(--muted);line-height:1.7}
+/* The heading carries the block: larger than body text, in the header's navy, with an
+   accent rule in front - a landmark, not an effect. */
+.ovh{margin:0 0 8px;font-size:18px;font-weight:650;letter-spacing:-.01em;color:var(--accent-2);
+  display:flex;align-items:center;gap:10px}
+.ovh::before{content:"";width:4px;height:18px;border-radius:2px;background:var(--accent);flex:none}
+.ovh-t{color:var(--accent-2)}
+/* No max-width: a measure set in `ch` capped the lede near 500px and left every block
+   ending in a half-page of empty card. The card sets the measure. */
+.ovlede{margin:0 0 16px;font-size:13px;color:var(--muted);line-height:1.65}
 
-/* ---- intro: the hero card ---- */
-.ovintro{background:
-    radial-gradient(640px 240px at 0% 0%,rgba(56,189,248,.16),transparent 70%),
-    radial-gradient(560px 260px at 100% 100%,rgba(167,139,250,.14),transparent 70%),
-    var(--glass),var(--surface)}
-.ovintro .ovh{font-size:23px}
-.ovintro .ovlede{font-size:13px;color:var(--text)}
+/* ---- intro ---- */
+.ovintro{background:linear-gradient(135deg,var(--accent-soft) 0%,var(--surface) 55%);
+  border-top:3px solid var(--accent)}
+.ovintro .ovh{font-size:21px}
+.ovintro .ovlede{color:var(--text)}
 .ovfeats{list-style:none;margin:0;padding:0;display:grid;gap:12px;
   grid-template-columns:repeat(auto-fit,minmax(235px,1fr))}
-.ovfeat{position:relative;background:rgba(255,255,255,.025);border:1px solid var(--line);
-  border-radius:12px;padding:14px 15px 15px;
-  animation:ovrise .55s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(.2s + var(--i)*.08s);
-  transition:border-color .22s,transform .22s,box-shadow .22s}
-.ovfeat:hover{border-color:var(--accent-line);transform:translateY(-2px);box-shadow:var(--glow)}
-.ovfeat-k{display:block;font-style:normal;font-size:11px;font-weight:750;letter-spacing:.14em;
-  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
-  margin-bottom:8px}
-.ovfeat b{display:block;font-size:13px;color:var(--ink);margin-bottom:5px;letter-spacing:-.005em}
-.ovfeat span{display:block;font-size:11.8px;color:var(--muted);line-height:1.6}
+.ovfeat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:13px 15px 14px;transition:border-color .15s}
+.ovfeat:hover{border-color:var(--accent-line)}
+.ovfeat-k{display:block;font-style:normal;font-size:11px;font-weight:700;letter-spacing:.1em;
+  color:var(--accent);margin-bottom:6px}
+.ovfeat b{display:block;font-size:13px;color:var(--ink);margin-bottom:4px}
+.ovfeat span{display:block;font-size:12px;color:var(--muted);line-height:1.6}
 .ovsource{margin:15px 0 0;font-size:11.5px;color:var(--dim);display:flex;align-items:center;
   flex-wrap:wrap;gap:6px}
-.ovsrc-k{font-size:9.5px;font-weight:750;letter-spacing:.12em;text-transform:uppercase;
-  color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:999px}
+.ovsrc-k{font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--accent);background:var(--accent-soft);padding:2px 7px;border-radius:var(--radius-sm)}
 .ovsource .mono{color:var(--text)}
 
-/* ---- figures: glass tiles, each with a lit left edge ---- */
+/* ---- figures ---- */
 .ovstats{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
 .ovstats-4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
-.ovstat{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:12px;
-  padding:13px 15px 14px 17px;
-  background:linear-gradient(160deg,rgba(56,189,248,.07),transparent 55%),rgba(255,255,255,.02)}
-.ovstat::after{content:"";position:absolute;left:0;top:13px;bottom:13px;width:2px;
-  border-radius:2px;background:var(--accent);box-shadow:0 0 10px var(--accent)}
-.ovstat.warn{background:linear-gradient(160deg,rgba(251,191,36,.09),transparent 55%),
-  rgba(255,255,255,.02)}
-.ovstat.warn::after{background:var(--warn);box-shadow:0 0 10px var(--warn)}
-.ovnum{font-family:var(--mono);font-size:24px;font-weight:750;color:var(--ink);line-height:1.2;
-  letter-spacing:-.02em;font-variant-numeric:tabular-nums;text-shadow:0 0 24px rgba(56,189,248,.28)}
-.ovstat.warn .ovnum{color:var(--warn);text-shadow:0 0 24px rgba(251,191,36,.3)}
-.ovto{font-family:var(--sans);font-size:12px;font-weight:500;color:var(--dim)}
-.ovlab{font-size:10.5px;font-weight:750;letter-spacing:.09em;text-transform:uppercase;
-  color:var(--muted);margin-top:5px}
-.ovnote{margin:7px 0 0;font-size:11.8px;color:var(--dim);line-height:1.6}
+.ovstat{background:var(--surface-2);border:1px solid var(--line);
+  border-left:3px solid var(--accent);border-radius:var(--radius-sm);padding:12px 14px 13px}
+.ovstat.warn{border-left-color:var(--warn);
+  background:color-mix(in srgb,var(--warn) 6%,var(--mix-up))}
+.ovnum{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--ink);line-height:1.2;
+  letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.ovstat.warn .ovnum{color:var(--warn)}
+.ovto{font-family:var(--sans);font-size:12px;font-weight:400;color:var(--dim)}
+.ovlab{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);margin-top:4px}
+.ovnote{margin:6px 0 0;font-size:12px;color:var(--dim);line-height:1.6}
 
-/* ---- horizontal bars: lit from within ---- */
+/* ---- horizontal bars ---- */
 .ovchart{margin:8px 0 4px}
-.ovbars{display:flex;flex-direction:column;gap:9px;margin-top:18px}
+.ovbars{display:flex;flex-direction:column;gap:8px;margin-top:18px}
 .ovbar{display:grid;grid-template-columns:86px 1fr 82px;align-items:center;gap:12px}
 .ovbar-lab{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--ink);
-  text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.04em}
-.ovbar-track{height:14px;background:rgba(255,255,255,.04);border-radius:7px;overflow:hidden;
-  box-shadow:inset 0 0 0 1px rgba(255,255,255,.035)}
-.ovbar-fill{display:block;height:100%;width:var(--pct);border-radius:7px;
-  background:linear-gradient(90deg,color-mix(in srgb,var(--hue) 30%,transparent),var(--hue));
-  box-shadow:0 0 16px -3px var(--hue);
-  animation:ovgrow .95s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(.3s + var(--i)*.07s)}
+  text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ovbar-track{height:12px;background:var(--surface-3);border-radius:3px;overflow:hidden}
+.ovbar-fill{display:block;height:100%;width:var(--pct);border-radius:3px;background:var(--hue);
+  animation:ovgrow .7s ease-out both;animation-delay:calc(.2s + var(--i)*.05s)}
 @keyframes ovgrow{from{width:0}}
 .ovbar-val{font-size:11.5px;color:var(--text);font-variant-numeric:tabular-nums}
 
 /* ---- acquisition columns ---- */
 .ovspan{display:flex;align-items:center;gap:12px;margin:0 0 12px;font-size:11.5px;color:var(--text)}
-.ovspan-line{flex:1;height:1px;background:var(--grad);opacity:.5}
+.ovspan-line{flex:1;height:1px;background:var(--line-strong)}
 .ovcols{display:flex;align-items:flex-end;gap:3px;height:140px;padding-bottom:20px;
   border-bottom:1px solid var(--line-strong);margin-bottom:16px}
 .ovcol{position:relative;flex:1;height:100%;display:flex;align-items:flex-end;min-width:4px}
-.ovcol-fill{display:block;width:100%;height:var(--h);border-radius:3px 3px 0 0;opacity:.72;
-  background:linear-gradient(180deg,#38bdf8 0%,rgba(129,140,248,.28) 100%);
-  animation:ovrisebar .8s cubic-bezier(.22,1,.36,1) both;
-  animation-delay:calc(.35s + var(--i)*.02s);transition:opacity .15s,filter .15s}
+.ovcol-fill{display:block;width:100%;height:var(--h);border-radius:2px 2px 0 0;
+  background:color-mix(in srgb,var(--accent) 55%,var(--mix-up));
+  animation:ovrisebar .6s ease-out both;animation-delay:calc(.25s + var(--i)*.012s);
+  transition:background .12s}
 @keyframes ovrisebar{from{height:0}}
-.ovcol.tall .ovcol-fill{opacity:1;background:linear-gradient(180deg,#c084fc 0%,#38bdf8 100%);
-  box-shadow:0 0 18px rgba(129,140,248,.65)}
-.ovcol:hover .ovcol-fill{opacity:1;filter:brightness(1.3)}
+.ovcol.tall .ovcol-fill{background:var(--accent-2)}
+.ovcol:hover .ovcol-fill{background:var(--accent)}
 .ovcol-lab{position:absolute;bottom:-19px;left:50%;transform:translateX(-50%);
   font-size:9.5px;font-family:var(--mono);color:var(--dim);white-space:nowrap}
 .ovcol-lab.off{display:none}
 
-/* ---- RT verdict dial ---- */
-.ovpie-wrap{display:grid;grid-template-columns:minmax(250px,330px) 1fr;gap:34px;align-items:center}
-.ovpie-stage{position:relative;aspect-ratio:1/1;max-width:330px;width:100%}
-/* The glow behind the dial: a soft cyan-violet bloom, so the instrument sits in light. */
-.ovpie-stage::before{content:"";position:absolute;inset:8%;border-radius:50%;
-  background:radial-gradient(circle,rgba(56,189,248,.26),rgba(167,139,250,.12) 45%,transparent 70%);
-  filter:blur(14px);animation:pfade 1.2s ease .2s both}
-.ovpie{position:relative;display:block;width:100%;height:100%;overflow:visible}
-.pdisc{fill:rgba(255,255,255,.022);stroke:rgba(255,255,255,.06);stroke-width:1}
-.ptick{fill:none;stroke:var(--line-strong);stroke-width:5}
-.ptick.major{stroke:var(--accent);stroke-width:9;filter:drop-shadow(0 0 3px var(--accent))}
-.porbit{fill:none;stroke:url(#pg-halo);stroke-width:1.1;stroke-dasharray:2 7;opacity:.75;
-  transform-origin:120px 120px;
-  animation:pfade .9s ease .3s both,porbit 60s linear 1.2s infinite}
-@keyframes porbit{to{transform:rotate(360deg)}}
-/* A wedge rests at its final arc; the sweep only supplies the empty first frame, and runs
-   exactly while the scanner arm crosses it. */
+/* ---- RT verdict pie ---- */
+.ovpie-wrap{display:grid;grid-template-columns:minmax(230px,290px) 1fr;gap:32px;align-items:center}
+.ovpie-stage{position:relative;aspect-ratio:1/1;max-width:290px;width:100%}
+.ovpie{display:block;width:100%;height:100%;overflow:visible}
+.pdisc{fill:var(--surface-2);stroke:var(--line);stroke-width:1}
+/* A wedge rests at its final arc; the draw only supplies the empty first frame. */
 .pw{stroke-dasharray:var(--len) var(--circ);stroke-dashoffset:var(--off);
   animation:pwsweep var(--d) linear var(--t0) both;
-  transition:transform .4s cubic-bezier(.2,.9,.3,1.3),opacity .25s,filter .25s;cursor:pointer}
+  transition:transform .2s ease-out,opacity .2s;cursor:pointer}
 @keyframes pwsweep{from{stroke-dasharray:0 var(--circ)}}
-.pw:hover,.ovpie .pw.hot{transform:translate(var(--dx),var(--dy));
-  filter:drop-shadow(0 0 10px var(--c))}
-.ovpie.has-hot .pw:not(.hot){opacity:.3}
-.psep{stroke:var(--surface);stroke-width:2.4;stroke-linecap:round;pointer-events:none;
-  animation:pfade .35s ease calc(var(--t0) + var(--sweep)) both}
-/* The scanner arm: visible only while it paints, gone at rest. */
-.pscan{transform-origin:120px 120px;opacity:0;pointer-events:none;
-  animation:pscan var(--sweep) linear var(--t0) both}
-.pscan line{stroke:#7dd3fc;stroke-width:1.6;stroke-linecap:round;
-  filter:drop-shadow(0 0 4px #38bdf8)}
-.pscan circle{fill:#e0f2fe;filter:drop-shadow(0 0 5px #38bdf8)}
-@keyframes pscan{0%{transform:rotate(0deg);opacity:1}90%{opacity:1}
-  100%{transform:rotate(360deg);opacity:0}}
-/* The hub: glass lens with the total, popping in as the arm completes its turn. */
-.phub{fill:url(#pg-hub);stroke:rgba(255,255,255,.12);stroke-width:1}
-.phub-ring{fill:none;stroke:url(#pg-halo);stroke-width:1.2;opacity:.8}
-.phub,.phub-ring,.ptotal,.psub{transform-origin:120px 120px;
-  animation:ppop .55s cubic-bezier(.2,1.45,.4,1) calc(var(--t0) + var(--sweep) - .25s) both}
-@keyframes ppop{from{opacity:0;transform:scale(.35)}}
-.ptotal{text-anchor:middle;font-family:var(--mono);font-size:19px;font-weight:750;fill:var(--ink)}
-.psub{text-anchor:middle;font-size:7px;font-weight:700;letter-spacing:.18em;
+.pw:hover,.ovpie .pw.hot{transform:translate(var(--dx),var(--dy))}
+.ovpie.has-hot .pw:not(.hot){opacity:.35}
+.psep{stroke:var(--surface);stroke-width:2;stroke-linecap:butt;pointer-events:none;
+  animation:pfade .3s ease calc(var(--t0) + var(--sweep)) both}
+.phub{fill:var(--surface);stroke:var(--line);stroke-width:1}
+.phub,.ptotal,.psub{animation:pfade .35s ease calc(var(--t0) + var(--sweep) - .15s) both}
+.ptotal{text-anchor:middle;font-family:var(--mono);font-size:19px;font-weight:700;fill:var(--ink)}
+.psub{text-anchor:middle;font-size:7px;font-weight:700;letter-spacing:.14em;
   text-transform:uppercase;fill:var(--muted)}
 @keyframes pfade{from{opacity:0}}
 
-/* The legend: one lit row per verdict, its share drawn as a bar that fills to match. */
-.pl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+/* The legend: one row per verdict, its share drawn as a bar beneath. */
+.pl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 .pl{display:grid;grid-template-columns:11px auto 1fr auto auto;
   grid-template-areas:"dot name note n pct" "bar bar bar bar bar";
-  align-items:center;gap:7px 11px;padding:11px 14px 12px;border-radius:11px;
-  border:1px solid var(--line);background:rgba(255,255,255,.022);cursor:default;
-  transition:border-color .2s,transform .2s,background .2s;
-  animation:plin .55s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(.5s + var(--i)*.09s)}
-@keyframes plin{from{opacity:0;transform:translateX(12px)}}
-.pl:hover,.pl:focus-visible,.pl.hot{outline:none;transform:translateX(4px);
-  border-color:color-mix(in srgb,var(--c) 55%,transparent);
-  background:linear-gradient(90deg,color-mix(in srgb,var(--c) 11%,transparent),transparent 72%),
-    rgba(255,255,255,.022)}
-.pl-dot{grid-area:dot;width:10px;height:10px;border-radius:50%;background:var(--c);
-  box-shadow:0 0 10px var(--c)}
-.pl-name{grid-area:name;font-family:var(--mono);font-size:11px;font-weight:750;
-  letter-spacing:.07em;color:var(--ink)}
-.pl-note{grid-area:note;font-size:11.5px;color:var(--dim);font-style:italic;min-width:0}
-.pl-n{grid-area:n;font-size:18px;font-weight:750;color:var(--ink);text-align:right}
+  align-items:center;gap:6px 11px;padding:10px 13px 11px;border-radius:var(--radius-sm);
+  border:1px solid var(--line);border-left:3px solid var(--c);background:var(--surface);
+  cursor:default;transition:background .15s,border-color .15s}
+.pl:hover,.pl:focus-visible,.pl.hot{outline:none;background:var(--surface-2);
+  border-color:color-mix(in srgb,var(--c) 45%,transparent);border-left-color:var(--c)}
+.pl-dot{grid-area:dot;width:10px;height:10px;border-radius:2px;background:var(--c)}
+.pl-name{grid-area:name;font-family:var(--mono);font-size:11px;font-weight:700;
+  letter-spacing:.05em;color:var(--ink)}
+.pl-note{grid-area:note;font-size:12px;color:var(--dim);min-width:0}
+.pl-n{grid-area:n;font-size:17px;font-weight:700;color:var(--ink);text-align:right}
 .pl-pct{grid-area:pct;font-size:11.5px;font-weight:700;color:var(--c);min-width:40px;text-align:right}
-.pl-bar{grid-area:bar;height:4px;border-radius:4px;background:rgba(255,255,255,.05);overflow:hidden}
-.pl-bar i{display:block;height:100%;width:var(--pct);border-radius:4px;
-  background:linear-gradient(90deg,color-mix(in srgb,var(--c) 35%,transparent),var(--c));
-  box-shadow:0 0 10px var(--c);
-  animation:ovgrow 1s cubic-bezier(.22,1,.36,1) both;animation-delay:calc(.65s + var(--i)*.09s)}
+.pl-bar{grid-area:bar;height:4px;border-radius:2px;background:var(--surface-3);overflow:hidden}
+.pl-bar i{display:block;height:100%;width:var(--pct);border-radius:2px;background:var(--c);
+  animation:ovgrow .7s ease-out both;animation-delay:calc(.35s + var(--i)*.06s)}
 
 /* ---- exact numbers, one click away ---- */
 .ovdetails{margin-top:16px}
-.ovdetails>summary{cursor:pointer;font-size:11.5px;font-weight:650;color:var(--accent);
+.ovdetails>summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--accent);
   padding:4px 0;width:max-content}
-.ovdetails>summary:hover{text-shadow:0 0 12px rgba(56,189,248,.6)}
+.ovdetails>summary:hover{text-decoration:underline}
 .ovtable{margin-top:10px}
 .ovtable .ovmod{font-family:var(--mono);font-weight:700;color:var(--ink)}
 .ovtable th.ovn,.ovtable td.ovn{text-align:right;white-space:nowrap}
 .ovempty{font-size:12px;color:var(--dim);margin:4px 0}
 .ovlegend{list-style:none;margin:0;padding:0;font-size:11.5px;color:var(--muted);line-height:2}
 .ovlegend b{color:var(--ink);font-family:var(--mono)}
-.ovdot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px}
+.ovdot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:7px}
 
 @media (max-width:760px){
   .ovstats,.ovstats-4{grid-template-columns:1fr}
@@ -838,16 +764,12 @@ def overview_styles() -> str:
     grid-template-columns:11px 1fr auto auto}
   .ovbar{grid-template-columns:70px 1fr 62px}
 }
-/* The resting style already is the final state (see the docstring); this block only stops
-   the one loop and the transient arm, and says so explicitly for every chart. */
+/* The resting style already is the final state; this block says so for every chart. */
 @media (prefers-reduced-motion:reduce){
-  .ovblock,.ovfeat,.pl{animation:none;opacity:1;transform:none}
+  .ovblock{animation:none;opacity:1;transform:none}
   .ovbar-fill,.pl-bar i{animation:none;width:var(--pct)}
   .ovcol-fill{animation:none;height:var(--h)}
   .pw{animation:none;stroke-dasharray:var(--len) var(--circ)}
-  .porbit{animation:none}
-  .pscan{animation:none;opacity:0}
-  .ovfeat:hover,.pl:hover,.pl.hot{transform:none}
 }
 /* Paper has no timeline: print every card in its resting, final state. */
 @media print{.overview *,.overview *::before{animation:none!important}}

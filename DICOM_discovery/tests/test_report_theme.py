@@ -36,11 +36,11 @@ def test_no_tint_is_mixed_against_a_literal_colour():
     assert literal_mixes == [], f"tint mixed against a literal: {literal_mixes[:3]}"
 
 
-def test_the_theme_is_declared_dark_so_native_controls_follow():
-    """Without color-scheme, the filter box, scrollbars and the <details> markers stay light
-    on a dark page."""
+def test_the_theme_declares_its_scheme_so_native_controls_follow():
+    """Without color-scheme, the filter box, scrollbars and the <details> markers do not
+    follow the page's palette."""
     root = _styles().split(":root{", 1)[1].split("}", 1)[0]
-    assert "color-scheme:dark" in root
+    assert "color-scheme:light" in root
     for token in ("--mix-up", "--mix-down", "--grad", "--glass"):
         assert token + ":" in root, f"{token} missing from :root"
 

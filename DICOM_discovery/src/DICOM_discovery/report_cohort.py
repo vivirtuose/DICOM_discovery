@@ -71,16 +71,15 @@ LOG = logging.getLogger("DICOM_discovery.report_cohort")
 # shipped in the cohort report and the standalone page at once; importing keeps them from
 # drifting apart again.
 
-# Verdict colours (semantics fixed by the design spec), tuned luminous for the midnight
-# theme: each must stay readable as text on --surface and still separate from its
-# neighbours for a reader with red-green colour blindness, which is why every verdict also
-# carries its word and never relies on hue alone. NO_RT is a neutral slate: a patient with no
+# Verdict colours (semantics fixed by the design spec), at clinical-document saturation:
+# each must stay readable as text on --surface (WCAG AA) and never rely on hue alone, which
+# is why every verdict also carries its word. NO_RT is a neutral slate: a patient with no
 # RT objects is *out of scope*, not a failure.
 VERDICT_COLORS = {
-    "OK": "#34d399",          # emerald
-    "WARN": "#fbbf24",        # amber
-    "INCOMPLETE": "#f87171",  # coral red
-    "NO_RT": "#94a3b8",       # slate (out of scope)
+    "OK": "#1e7a4f",          # clinical green
+    "WARN": "#a36400",        # ochre
+    "INCOMPLETE": "#b3261e",  # brick red
+    "NO_RT": "#5f7085",       # slate (out of scope)
 }
 VERDICT_ORDER = ["OK", "WARN", "INCOMPLETE", "NO_RT"]
 
@@ -245,29 +244,29 @@ def _timeline_map_html(table: pd.DataFrame, embed_js: bool = True) -> str:
         size = 11 if is_struct else np.clip(np.log1p(sub["n_series"].to_numpy()) * 4 + 6, 6, 16)
         fig.add_trace(go.Scatter(
             x=sub["_date"], y=sub["patient_id"].astype(str), mode="markers", name=mod,
-            marker=dict(size=size, color=_MOD_COLORS.get(mod, "#64748b"),
-                        symbol="diamond" if is_struct else "circle", opacity=.92,
-                        line=dict(color="rgba(6,10,20,.85)", width=1.2)),
+            marker=dict(size=size, color=_MOD_COLORS.get(mod, "#6b7785"),
+                        symbol="diamond" if is_struct else "circle", opacity=.95,
+                        line=dict(color="rgba(255,255,255,.95)", width=1)),
             customdata=custom,
             hovertemplate=("<b>%{y}</b> · %{customdata[0]}"
                            "<br>Date : %{customdata[3]}"
                            "<br>Series : %{customdata[1]} · Studies : %{customdata[2]}"
                            "<br><b>Source</b> :<br>%{customdata[4]}<extra></extra>"),
         ))
-    # Dark to match the page: transparent paper so the card's glass shows through, gridlines
-    # drawn in the theme's own hairline colour, hover labels on the card surface.
+    # Light, matching the page: transparent paper so the card shows through, gridlines drawn
+    # in the theme's own hairline colour, hover labels on the card surface.
     fig.update_layout(
-        template="plotly_dark",
+        template="plotly_white",
         height=max(300, 26 * len(patients) + 150),
         margin=dict(t=24, l=96, r=24, b=56),
-        xaxis=dict(title="DICOM study date", gridcolor="#1d2843", zerolinecolor="#2b3a5e",
-                   linecolor="#2b3a5e"),
+        xaxis=dict(title="DICOM study date", gridcolor="#e1e8f0", zerolinecolor="#b9c7d6",
+                   linecolor="#b9c7d6"),
         yaxis=dict(title="patient", type="category", categoryorder="array",
-                   categoryarray=patients, autorange="reversed", gridcolor="#1d2843",
-                   linecolor="#2b3a5e"),
-        legend=dict(orientation="h", y=1.04, x=0, title="", font=dict(color="#cdd6ee")),
-        font=dict(color="#cdd6ee", family="Inter, ui-sans-serif, system-ui, sans-serif", size=12),
-        hoverlabel=dict(bgcolor="#0d1425", bordercolor="#38bdf8", font=dict(color="#eef3ff")),
+                   categoryarray=patients, autorange="reversed", gridcolor="#e1e8f0",
+                   linecolor="#b9c7d6"),
+        legend=dict(orientation="h", y=1.04, x=0, title="", font=dict(color="#243a52")),
+        font=dict(color="#243a52", family="Segoe UI, ui-sans-serif, system-ui, sans-serif", size=12),
+        hoverlabel=dict(bgcolor="#fbfcfe", bordercolor="#0f6b87", font=dict(color="#10243b")),
         hovermode="closest", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
     )
     return fig.to_html(full_html=False, include_plotlyjs=bool(embed_js))
@@ -325,7 +324,7 @@ def _verdict_pill(status: str) -> str:
     # Sober status tag (NHS/USWDS style): the verdict word carries the meaning, a small
     # square swatch carries the colour. Legible without colour (the word + a per-status
     # class + an aria-label), so it satisfies WCAG without a decorative glyph.
-    color = VERDICT_COLORS.get(status, "#94a3b8")
+    color = VERDICT_COLORS.get(status, "#5f7085")
     return (f"<span class='pill pill-{_esc(status)}' data-verdict='{_esc(status)}' "
             f"style='--pill:{color}' aria-label=\"verdict: {_esc(status)}\">"
             f"{_esc(status)}</span>")
@@ -547,100 +546,86 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
 
 
 def _styles() -> str:
-    # Design language: "Midnight Aurora". A deep navy ground lit by two soft aurora glows
-    # (cyan, violet) over a faint dot grid; surfaces are frosted glass lifted in steps rather
-    # than greyed; one cyan-to-violet gradient carries identity and structure; the verdict
-    # colours are tuned luminous so they read on midnight without shouting.
+    # Design language: "Clinical navy" - the register of hospital imaging software, not of a
+    # dashboard. A softly blue-tinted canvas (neither white nor grey), near-white cards, a
+    # deep navy header bar, and a single petrol-blue accent used for structure. No glow, no
+    # gradient text, no decorative motion: a physician reads this page to decide what to
+    # chase, and anything that competes with the four verdict colours costs attention.
     #
     # Two rules keep the sheet honest:
-    # * Colour still means something. The gradient is identity (brand, headings, the active
-    #   tab); OK / WARN / INCOMPLETE / NO_RT and present / missing keep their own hues and are
-    #   never used as decoration.
+    # * Colour means something. OK / WARN / INCOMPLETE / NO_RT and present / missing keep
+    #   their own hues and are never used as decoration.
     # * No colour is mixed against a literal. Every "a hint of this hue" blends into --mix-up
     #   (the card) and every "a readable shade of this hue" into --mix-down (the ink), so the
     #   whole theme turns on the :root block below and nothing else.
     return """
 :root{
-  color-scheme:dark;
-  /* Surfaces: midnight navy, lifted in steps - never grey. */
-  --bg:#060a14; --surface:#0d1425; --surface-2:#121b30; --surface-3:#18223b;
-  --line:#1d2843; --line-strong:#2b3a5e;
-  /* Ink: cool whites, never pure. */
-  --ink:#eef3ff; --text:#cdd6ee; --muted:#96a2c4; --dim:#68769c;
-  /* Identity: a cyan-to-violet aurora. Cyan carries structure; violet only shades it. */
-  --accent:#38bdf8; --accent-2:#a78bfa;
-  --accent-soft:rgba(56,189,248,.10); --accent-line:#24496f;
-  --grad:linear-gradient(115deg,#38bdf8 0%,#818cf8 52%,#c084fc 100%);
-  /* Functional hues, luminous enough to read on midnight. */
-  --ok:#34d399; --warn:#fbbf24; --incomplete:#f87171; --nort:#94a3b8; --absent:#fb7185;
+  color-scheme:light;
+  /* Canvas and surfaces: a blue-tinted stack, lifted toward white for what is read. */
+  --bg:#e7edf4; --surface:#fbfcfe; --surface-2:#f1f5f9; --surface-3:#e6ecf3;
+  --line:#d5dfe9; --line-strong:#b9c7d6;
+  /* Ink: navy, not black. */
+  --ink:#10243b; --text:#243a52; --muted:#51657c; --dim:#7a8ca0;
+  /* One accent, petrol blue; the navy of the header bar is its dark partner. */
+  --accent:#0f6b87; --accent-2:#173f66; --navy:#122f4d;
+  --accent-soft:#e2eff4; --accent-line:#a8ccd9;
+  --grad:linear-gradient(90deg,#0f6b87,#173f66);
+  /* Functional hues, at clinical-document saturation. */
+  --ok:#1e7a4f; --warn:#a36400; --incomplete:#b3261e; --nort:#5f7085; --absent:#b3261e;
   /* Tint bases - see the rule in _styles(). */
-  --mix-up:#0d1425; --mix-down:#f5f8ff;
-  /* Glass: a faint top-lit sheen over the surface, a hairline, and a long soft drop. */
-  --glass:linear-gradient(180deg,rgba(255,255,255,.05) 0%,rgba(255,255,255,.012) 100%);
-  --shadow:inset 0 1px 0 rgba(255,255,255,.05),0 22px 44px -30px rgba(0,0,0,.95);
-  --glow:0 0 0 1px rgba(56,189,248,.28),0 0 26px -6px rgba(56,189,248,.45);
-  --mono:ui-monospace,"SF Mono","JetBrains Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
-  --sans:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  --radius:12px; --radius-sm:7px;
+  --mix-up:#fbfcfe; --mix-down:#0b1a2b;
+  --glass:linear-gradient(transparent,transparent);
+  --shadow:0 1px 2px rgba(16,36,59,.05),0 6px 18px -12px rgba(16,36,59,.18);
+  --glow:0 0 0 3px rgba(15,107,135,.18);
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:"Segoe UI",ui-sans-serif,system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  --radius:8px; --radius-sm:5px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{background:var(--bg)}
 body{
-  /* Two aurora glows and a dot grid, fixed so they stay put while the table scrolls. */
-  background:
-    radial-gradient(1000px 560px at 6% -10%,rgba(56,189,248,.17),transparent 62%),
-    radial-gradient(820px 520px at 98% 0%,rgba(167,139,250,.16),transparent 60%),
-    radial-gradient(900px 600px at 50% 115%,rgba(52,211,153,.06),transparent 60%),
-    radial-gradient(rgba(150,165,200,.085) 1px,transparent 1.3px) 0 0/22px 22px,
-    var(--bg);
-  background-attachment:fixed;
+  background:var(--bg);
   color:var(--text);font-family:var(--sans);
   font-size:13.5px;line-height:1.55;-webkit-font-smoothing:antialiased;
   font-feature-settings:"tnum" 1,"cv11" 1;min-height:100vh;
 }
-::selection{background:rgba(56,189,248,.32);color:var(--ink)}
+::selection{background:#bfdbe6;color:var(--ink)}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:10px;
   border:2px solid var(--bg)}
-::-webkit-scrollbar-thumb:hover{background:#3b4d78}
+::-webkit-scrollbar-thumb:hover{background:#9fb2c6}
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .dim{color:var(--dim)}
 
-/* ---- topbar: frosted glass over the aurora, one gradient hairline beneath ---- */
+/* ---- topbar: the navy bar of clinical software - identity lives here, not in effects ---- */
 .topbar{
   position:sticky;top:0;z-index:30;
   display:flex;align-items:center;gap:18px;flex-wrap:wrap;
-  padding:14px 30px;background:rgba(7,11,22,.72);
-  -webkit-backdrop-filter:blur(16px) saturate(150%);backdrop-filter:blur(16px) saturate(150%);
-  border-bottom:1px solid var(--line);
+  padding:12px 30px;background:var(--navy);color:#e6eef7;
+  border-bottom:3px solid var(--accent);
 }
-.topbar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;
-  background:var(--grad);opacity:.55}
 .brand{display:flex;align-items:baseline;gap:12px}
-.title{font-size:16px;font-weight:750;letter-spacing:-.01em;
-  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
-.title .thin{font-weight:400;-webkit-text-fill-color:var(--muted);color:var(--muted)}
+.title{font-size:16px;font-weight:700;letter-spacing:-.005em;color:#fff}
+.title .thin{font-weight:400;color:#b7c8db}
 .subtitle{
-  color:var(--muted);font-size:12px;
-  border-left:1px solid var(--line-strong);padding-left:12px;align-self:center;
+  color:#b7c8db;font-size:12px;
+  border-left:1px solid rgba(255,255,255,.22);padding-left:12px;align-self:center;
 }
-/* RUO: a regulatory line. Amber outline so it is seen, not a badge that begs to be. */
+/* RUO: a regulatory line, legible on navy, never styled as a badge to be clicked. */
 .ruo{
-  margin-left:auto;font-size:11px;font-weight:550;letter-spacing:.01em;
-  color:color-mix(in srgb,var(--warn) 78%,var(--mix-down));
-  background:color-mix(in srgb,var(--warn) 8%,transparent);
-  border:1px solid color-mix(in srgb,var(--warn) 34%,transparent);
-  padding:5px 12px;border-radius:999px;
+  margin-left:auto;font-size:11px;font-weight:600;letter-spacing:.01em;color:#ffe2a8;
+  background:rgba(255,196,64,.10);border:1px solid rgba(255,196,64,.38);
+  padding:4px 11px;border-radius:var(--radius-sm);
 }
 .manifest{
   display:flex;flex-wrap:wrap;gap:6px 30px;width:100%;
-  padding-top:11px;margin-top:3px;border-top:1px solid var(--line);
+  padding-top:10px;margin-top:3px;border-top:1px solid rgba(255,255,255,.14);
 }
 .manifest-item{display:flex;flex-direction:column;gap:1px;line-height:1.25}
-.mk{font-size:10px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase}
+.mk{font-size:10px;color:#9fb3c9;letter-spacing:.08em;text-transform:uppercase}
 .mv{
-  font-family:var(--mono);font-size:11.5px;color:var(--text);
+  font-family:var(--mono);font-size:11.5px;color:#e6eef7;
   max-width:54ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 
@@ -672,12 +657,11 @@ main{max-width:1240px;margin:0 auto;padding:28px 30px 52px}
   font:inherit;text-align:left;color:inherit;background:transparent;
   cursor:pointer;transition:background .18s,box-shadow .18s;position:relative;
 }
-.kpi-btn:hover{background:rgba(56,189,248,.05)}
+.kpi-btn:hover{background:var(--surface-2)}
 .kpi-btn:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent-line)}
 .kpi-btn[aria-pressed="true"]{background:var(--accent-soft)}
 .kpi-btn[aria-pressed="true"]::after{content:"";position:absolute;left:14px;right:14px;
-  bottom:0;height:2px;border-radius:2px;background:var(--grad);
-  box-shadow:0 0 12px rgba(56,189,248,.7)}
+  bottom:0;height:3px;border-radius:2px 2px 0 0;background:var(--accent)}
 .kpi-static{margin-left:auto;text-align:right;align-items:flex-end}
 
 /* ---- tabs: the active one carries the gradient and a glowing rule ---- */
@@ -687,11 +671,10 @@ main{max-width:1240px;margin:0 auto;padding:28px 30px 52px}
   font-size:13px;font-weight:600;padding:10px 18px 11px;cursor:pointer;position:relative;
   border-radius:var(--radius-sm) var(--radius-sm) 0 0;transition:color .18s,background .18s;
 }
-.tab:hover{color:var(--ink);background:rgba(255,255,255,.025)}
-.tab[aria-selected="true"]{color:var(--ink);background:rgba(56,189,248,.06)}
+.tab:hover{color:var(--ink);background:var(--surface-2)}
+.tab[aria-selected="true"]{color:var(--accent-2);background:var(--surface)}
 .tab[aria-selected="true"]::after{content:"";position:absolute;left:10px;right:10px;
-  bottom:-1px;height:2px;border-radius:2px;background:var(--grad);
-  box-shadow:0 0 14px rgba(56,189,248,.8)}
+  bottom:-1px;height:3px;border-radius:2px 2px 0 0;background:var(--accent)}
 .tab:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent-line)}
 .tab .count{font-family:var(--mono);font-size:10.5px;color:var(--accent);margin-left:8px;
   background:var(--accent-soft);padding:1px 7px;border-radius:999px}
@@ -723,7 +706,7 @@ main{max-width:1240px;margin:0 auto;padding:28px 30px 52px}
   box-shadow:var(--shadow);
 }
 .grid thead th{
-  background:rgba(255,255,255,.028);text-align:left;
+  background:var(--surface-2);text-align:left;
   font-family:var(--sans);font-size:10.5px;font-weight:700;color:var(--muted);
   letter-spacing:.08em;text-transform:uppercase;
   padding:12px 14px;border-bottom:1px solid var(--line-strong);white-space:nowrap;
@@ -736,7 +719,7 @@ main{max-width:1240px;margin:0 auto;padding:28px 30px 52px}
 .grid td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
 .grid tbody tr:last-child td{border-bottom:none}
 .grid tbody tr{transition:background .15s}
-.grid tbody tr:hover{background:rgba(56,189,248,.045)}
+.grid tbody tr:hover{background:#eef4f9}
 .prow.has-detail{cursor:pointer}
 .prow.open{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
 .prow.open:hover{background:var(--accent-soft)}
@@ -752,10 +735,10 @@ main{max-width:1240px;margin:0 auto;padding:28px 30px 52px}
   color:color-mix(in srgb,var(--pill) 84%,var(--mix-down));
   background:color-mix(in srgb,var(--pill) 13%,var(--mix-up));
   border:1px solid color-mix(in srgb,var(--pill) 36%,transparent);
-  padding:3px 10px 3px 9px;border-radius:999px;white-space:nowrap;
+  padding:2px 9px 2px 8px;border-radius:var(--radius-sm);white-space:nowrap;
 }
 .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--pill);
-  flex:none;box-shadow:0 0 8px var(--pill)}
+  flex:none}
 .tag.frag{
   margin-left:8px;font-size:10.5px;color:var(--warn);
   border:1px solid color-mix(in srgb,var(--warn) 38%,transparent);
@@ -773,7 +756,7 @@ main{max-width:1240px;margin:0 auto;padding:28px 30px 52px}
 .pcell .plabel{font-size:8.5px;letter-spacing:.05em;color:var(--muted)}
 .pcell.on{background:color-mix(in srgb,var(--ok) 12%,var(--mix-up));
   border-color:color-mix(in srgb,var(--ok) 40%,transparent)}
-.pcell.on .pmark{color:var(--ok);text-shadow:0 0 8px color-mix(in srgb,var(--ok) 60%,transparent)}
+.pcell.on .pmark{color:var(--ok)}
 .pcell.on .plabel{color:color-mix(in srgb,var(--ok) 70%,var(--mix-down))}
 .pcell.off{background:transparent;border:1px dashed var(--line-strong)}
 .pcell.off .pmark{color:var(--absent)}
@@ -787,8 +770,8 @@ main{max-width:1240px;margin:0 auto;padding:28px 30px 52px}
 
 /* ---- drill-down detail ---- */
 .detail{
-  background:rgba(5,9,18,.55);border:1px solid var(--line);border-radius:var(--radius);
-  margin:4px 0 10px;padding:18px 20px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius);
+  margin:4px 0 10px;padding:18px 20px;
 }
 .detail-summary{
   display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));
@@ -881,10 +864,9 @@ footer b{color:var(--muted)}
   var(--glass),var(--surface);
   border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);
   padding:17px 19px 19px;margin-bottom:20px;border-left:3px solid var(--incomplete)}
-.gaph{margin:0 0 7px;font-size:17px;font-weight:750;color:var(--incomplete);
+.gaph{margin:0 0 7px;font-size:17px;font-weight:700;color:var(--incomplete);
   letter-spacing:-.012em;display:flex;align-items:center;gap:10px}
-.gaph::before{content:'';width:4px;height:18px;border-radius:2px;background:var(--incomplete);
-  box-shadow:0 0 12px var(--incomplete)}
+.gaph::before{content:'';width:4px;height:18px;border-radius:2px;background:var(--incomplete)}
 .gaplede{margin:0 0 12px;font-size:12.5px;color:var(--muted);line-height:1.65}
 .gapblock .gaptable{margin-bottom:0}
 /* The follow-up badge sits under its chips: the chips say what is missing, the badge says
