@@ -481,7 +481,7 @@ def completeness_styles() -> str:
     from .report_cohort import VERDICT_COLORS
 
     swatches = "\n".join(
-        f".sw-{state}{{background:color-mix(in srgb,{VERDICT_COLORS[verdict]} 16%,#fff);"
+        f".sw-{state}{{background:color-mix(in srgb,{VERDICT_COLORS[verdict]} 22%,var(--mix-up));"
         f"border-color:color-mix(in srgb,{VERDICT_COLORS[verdict]} 45%,transparent)}}\n"
         f".chip-{state}{{--chip:{VERDICT_COLORS[verdict]}}}"
         for state, verdict in _STATE_VERDICT.items()
@@ -527,7 +527,8 @@ def completeness_styles() -> str:
 /* A clean cohort is a result, not an empty table — it reads as a sentence. */
 .nogap{
   color:var(--ok);font-size:13px;margin:0 0 20px;padding:11px 14px;
-  background:#f0f6f1;border:1px solid #cce0d2;border-radius:var(--radius);
+  background:color-mix(in srgb,var(--ok) 10%,var(--mix-up));
+  border:1px solid color-mix(in srgb,var(--ok) 34%,transparent);border-radius:var(--radius);
 }
 
 /* ---- the per-patient drill-down (native <details>, no JS) ---- */
@@ -610,8 +611,8 @@ def completeness_styles() -> str:
 .chip{
   display:inline-flex;align-items:center;gap:4px;margin:1px 3px 1px 0;
   font-size:10.5px;font-weight:600;letter-spacing:.01em;
-  color:color-mix(in srgb,var(--chip) 78%,#101820);
-  background:color-mix(in srgb,var(--chip) 9%,#fff);
+  color:color-mix(in srgb,var(--chip) 82%,var(--mix-down));
+  background:color-mix(in srgb,var(--chip) 13%,var(--mix-up));
   border:1px solid color-mix(in srgb,var(--chip) 30%,transparent);
   padding:1px 6px;border-radius:var(--radius-sm);white-space:nowrap;
 }

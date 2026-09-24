@@ -48,6 +48,7 @@ from .report_completeness import (
     gap_table_html,
 )
 from .report_overview import (
+    MOD_COLORS,
     cohort_overview,
     overview_script,
     overview_section_html,
@@ -70,23 +71,23 @@ LOG = logging.getLogger("DICOM_discovery.report_cohort")
 # shipped in the cohort report and the standalone page at once; importing keeps them from
 # drifting apart again.
 
-# Verdict colours (semantics fixed by the design spec). Muted, document-grade tones —
-# saturated enough to carry meaning, never bright enough to read as a dashboard. NO_RT is a
-# neutral slate: a patient with no RT objects is *out of scope*, not a failure.
+# Verdict colours (semantics fixed by the design spec), tuned luminous for the midnight
+# theme: each must stay readable as text on --surface and still separate from its
+# neighbours for a reader with red-green colour blindness, which is why every verdict also
+# carries its word and never relies on hue alone. NO_RT is a neutral slate: a patient with no
+# RT objects is *out of scope*, not a failure.
 VERDICT_COLORS = {
-    "OK": "#2e7d4f",          # muted green
-    "WARN": "#946000",        # ochre
-    "INCOMPLETE": "#b42318",  # brick red
-    "NO_RT": "#5b6775",       # slate (out of scope)
+    "OK": "#34d399",          # emerald
+    "WARN": "#fbbf24",        # amber
+    "INCOMPLETE": "#f87171",  # coral red
+    "NO_RT": "#94a3b8",       # slate (out of scope)
 }
 VERDICT_ORDER = ["OK", "WARN", "INCOMPLETE", "NO_RT"]
 
-# Per-modality colours for the cohort timeline map (one legend entry per modality).
-_MOD_COLORS = {
-    "MR": "#4878a8", "CT": "#5a9367", "RTSTRUCT": "#c0883b", "RTPLAN": "#9a6fb0",
-    "RTDOSE": "#b5564f", "PT": "#4aa3a3", "REG": "#8a8f99", "SEG": "#7d6f4f",
-    "SR": "#a0a0a0", "OT": "#888888",
-}
+# Per-modality colours: one palette, owned by report_overview, so the cohort map and the
+# overview's modality bars paint CT the same colour. They used to be two dicts that each
+# claimed to match the other and did not.
+_MOD_COLORS = MOD_COLORS
 _MOD_ORDER = {"MR": 0, "CT": 1, "RTSTRUCT": 2, "RTPLAN": 3, "RTDOSE": 4,
               "PT": 5, "REG": 6, "SEG": 7, "SR": 8, "OT": 9}
 
@@ -244,24 +245,29 @@ def _timeline_map_html(table: pd.DataFrame, embed_js: bool = True) -> str:
         size = 11 if is_struct else np.clip(np.log1p(sub["n_series"].to_numpy()) * 4 + 6, 6, 16)
         fig.add_trace(go.Scatter(
             x=sub["_date"], y=sub["patient_id"].astype(str), mode="markers", name=mod,
-            marker=dict(size=size, color=_MOD_COLORS.get(mod, "#7f8c8d"),
-                        symbol="diamond" if is_struct else "circle",
-                        line=dict(color="rgba(20,30,45,.5)", width=1)),
+            marker=dict(size=size, color=_MOD_COLORS.get(mod, "#64748b"),
+                        symbol="diamond" if is_struct else "circle", opacity=.92,
+                        line=dict(color="rgba(6,10,20,.85)", width=1.2)),
             customdata=custom,
             hovertemplate=("<b>%{y}</b> · %{customdata[0]}"
                            "<br>Date : %{customdata[3]}"
                            "<br>Series : %{customdata[1]} · Studies : %{customdata[2]}"
                            "<br><b>Source</b> :<br>%{customdata[4]}<extra></extra>"),
         ))
+    # Dark to match the page: transparent paper so the card's glass shows through, gridlines
+    # drawn in the theme's own hairline colour, hover labels on the card surface.
     fig.update_layout(
-        template="plotly_white",
+        template="plotly_dark",
         height=max(300, 26 * len(patients) + 150),
         margin=dict(t=24, l=96, r=24, b=56),
-        xaxis=dict(title="DICOM study date", gridcolor="#eef1f5"),
+        xaxis=dict(title="DICOM study date", gridcolor="#1d2843", zerolinecolor="#2b3a5e",
+                   linecolor="#2b3a5e"),
         yaxis=dict(title="patient", type="category", categoryorder="array",
-                   categoryarray=patients, autorange="reversed", gridcolor="#eef1f5"),
-        legend=dict(orientation="h", y=1.04, x=0, title=""),
-        font=dict(color="#1b2430", family="ui-sans-serif, system-ui, sans-serif", size=12),
+                   categoryarray=patients, autorange="reversed", gridcolor="#1d2843",
+                   linecolor="#2b3a5e"),
+        legend=dict(orientation="h", y=1.04, x=0, title="", font=dict(color="#cdd6ee")),
+        font=dict(color="#cdd6ee", family="Inter, ui-sans-serif, system-ui, sans-serif", size=12),
+        hoverlabel=dict(bgcolor="#0d1425", bordercolor="#38bdf8", font=dict(color="#eef3ff")),
         hovermode="closest", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
     )
     return fig.to_html(full_html=False, include_plotlyjs=bool(embed_js))
@@ -319,7 +325,7 @@ def _verdict_pill(status: str) -> str:
     # Sober status tag (NHS/USWDS style): the verdict word carries the meaning, a small
     # square swatch carries the colour. Legible without colour (the word + a per-status
     # class + an aria-label), so it satisfies WCAG without a decorative glyph.
-    color = VERDICT_COLORS.get(status, "#5b6775")
+    color = VERDICT_COLORS.get(status, "#94a3b8")
     return (f"<span class='pill pill-{_esc(status)}' data-verdict='{_esc(status)}' "
             f"style='--pill:{color}' aria-label=\"verdict: {_esc(status)}\">"
             f"{_esc(status)}</span>")
@@ -541,170 +547,219 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
 
 
 def _styles() -> str:
-    # Design language: a sober clinical *document* — the look of hospital / clinical-trial
-    # data software, not a dashboard. A quiet grey paper surface, one discreet slate-blue
-    # accent used only for structure, and colour spent solely where it carries meaning
-    # (the four verdicts, the five completeness states, present/absent in the data strip).
-    # Plain bordered tables, NHS/USWDS-style status tags, no gradients/glow/animation.
-    # The whole palette is governed from the :root variables below.
+    # Design language: "Midnight Aurora". A deep navy ground lit by two soft aurora glows
+    # (cyan, violet) over a faint dot grid; surfaces are frosted glass lifted in steps rather
+    # than greyed; one cyan-to-violet gradient carries identity and structure; the verdict
+    # colours are tuned luminous so they read on midnight without shouting.
+    #
+    # Two rules keep the sheet honest:
+    # * Colour still means something. The gradient is identity (brand, headings, the active
+    #   tab); OK / WARN / INCOMPLETE / NO_RT and present / missing keep their own hues and are
+    #   never used as decoration.
+    # * No colour is mixed against a literal. Every "a hint of this hue" blends into --mix-up
+    #   (the card) and every "a readable shade of this hue" into --mix-down (the ink), so the
+    #   whole theme turns on the :root block below and nothing else.
     return """
 :root{
-  /* Surfaces — a quiet, paper-like stack of greys. */
-  --bg:#e9edf1; --surface:#ffffff; --surface-2:#f4f7f9; --surface-3:#eaeef2;
-  --line:#dde3e9; --line-strong:#c6cfd8;
-  /* Ink */
-  --ink:#1d2733; --text:#2c3744; --muted:#5c6877; --dim:#8794a1;
-  /* One discreet institutional accent (slate blue) — used for structure, never decoration. */
-  --accent:#2a5d8f; --accent-soft:#eef3f8; --accent-line:#bdd0e1;
-  /* Functional colours, spent only where they carry meaning. */
-  --ok:#2e7d4f; --warn:#946000; --incomplete:#b42318; --nort:#5b6775; --absent:#b0584f;
-  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
-  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  --radius:6px; --radius-sm:4px;
+  color-scheme:dark;
+  /* Surfaces: midnight navy, lifted in steps - never grey. */
+  --bg:#060a14; --surface:#0d1425; --surface-2:#121b30; --surface-3:#18223b;
+  --line:#1d2843; --line-strong:#2b3a5e;
+  /* Ink: cool whites, never pure. */
+  --ink:#eef3ff; --text:#cdd6ee; --muted:#96a2c4; --dim:#68769c;
+  /* Identity: a cyan-to-violet aurora. Cyan carries structure; violet only shades it. */
+  --accent:#38bdf8; --accent-2:#a78bfa;
+  --accent-soft:rgba(56,189,248,.10); --accent-line:#24496f;
+  --grad:linear-gradient(115deg,#38bdf8 0%,#818cf8 52%,#c084fc 100%);
+  /* Functional hues, luminous enough to read on midnight. */
+  --ok:#34d399; --warn:#fbbf24; --incomplete:#f87171; --nort:#94a3b8; --absent:#fb7185;
+  /* Tint bases - see the rule in _styles(). */
+  --mix-up:#0d1425; --mix-down:#f5f8ff;
+  /* Glass: a faint top-lit sheen over the surface, a hairline, and a long soft drop. */
+  --glass:linear-gradient(180deg,rgba(255,255,255,.05) 0%,rgba(255,255,255,.012) 100%);
+  --shadow:inset 0 1px 0 rgba(255,255,255,.05),0 22px 44px -30px rgba(0,0,0,.95);
+  --glow:0 0 0 1px rgba(56,189,248,.28),0 0 26px -6px rgba(56,189,248,.45);
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --radius:12px; --radius-sm:7px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg)}
 body{
-  background:var(--bg);color:var(--text);font-family:var(--sans);
-  font-size:13.5px;line-height:1.5;-webkit-font-smoothing:antialiased;
-  font-feature-settings:"tnum" 1;
+  /* Two aurora glows and a dot grid, fixed so they stay put while the table scrolls. */
+  background:
+    radial-gradient(1000px 560px at 6% -10%,rgba(56,189,248,.17),transparent 62%),
+    radial-gradient(820px 520px at 98% 0%,rgba(167,139,250,.16),transparent 60%),
+    radial-gradient(900px 600px at 50% 115%,rgba(52,211,153,.06),transparent 60%),
+    radial-gradient(rgba(150,165,200,.085) 1px,transparent 1.3px) 0 0/22px 22px,
+    var(--bg);
+  background-attachment:fixed;
+  color:var(--text);font-family:var(--sans);
+  font-size:13.5px;line-height:1.55;-webkit-font-smoothing:antialiased;
+  font-feature-settings:"tnum" 1,"cv11" 1;min-height:100vh;
 }
+::selection{background:rgba(56,189,248,.32);color:var(--ink)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:10px;
+  border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:#3b4d78}
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .dim{color:var(--dim)}
 
-/* ---- topbar: a clinical document header ---- */
+/* ---- topbar: frosted glass over the aurora, one gradient hairline beneath ---- */
 .topbar{
   position:sticky;top:0;z-index:30;
   display:flex;align-items:center;gap:18px;flex-wrap:wrap;
-  padding:13px 30px;background:var(--surface);
-  border-bottom:1px solid var(--line-strong);
+  padding:14px 30px;background:rgba(7,11,22,.72);
+  -webkit-backdrop-filter:blur(16px) saturate(150%);backdrop-filter:blur(16px) saturate(150%);
+  border-bottom:1px solid var(--line);
 }
-.brand{display:flex;align-items:baseline;gap:11px}
-.title{font-size:15px;font-weight:650;color:var(--ink);letter-spacing:0}
-.title .thin{color:var(--muted);font-weight:400}
+.topbar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;
+  background:var(--grad);opacity:.55}
+.brand{display:flex;align-items:baseline;gap:12px}
+.title{font-size:16px;font-weight:750;letter-spacing:-.01em;
+  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.title .thin{font-weight:400;-webkit-text-fill-color:var(--muted);color:var(--muted)}
 .subtitle{
   color:var(--muted);font-size:12px;
-  border-left:1px solid var(--line-strong);padding-left:11px;align-self:center;
+  border-left:1px solid var(--line-strong);padding-left:12px;align-self:center;
 }
-/* RUO: a plain bordered note — a regulatory line, not a badge. */
+/* RUO: a regulatory line. Amber outline so it is seen, not a badge that begs to be. */
 .ruo{
-  margin-left:auto;font-size:11px;color:var(--muted);
-  background:var(--surface-2);border:1px solid var(--line);
-  padding:4px 11px;border-radius:var(--radius-sm);
+  margin-left:auto;font-size:11px;font-weight:550;letter-spacing:.01em;
+  color:color-mix(in srgb,var(--warn) 78%,var(--mix-down));
+  background:color-mix(in srgb,var(--warn) 8%,transparent);
+  border:1px solid color-mix(in srgb,var(--warn) 34%,transparent);
+  padding:5px 12px;border-radius:999px;
 }
 .manifest{
   display:flex;flex-wrap:wrap;gap:6px 30px;width:100%;
   padding-top:11px;margin-top:3px;border-top:1px solid var(--line);
 }
 .manifest-item{display:flex;flex-direction:column;gap:1px;line-height:1.25}
-.mk{font-size:10px;color:var(--dim);letter-spacing:.01em}
+.mk{font-size:10px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase}
 .mv{
   font-family:var(--mono);font-size:11.5px;color:var(--text);
   max-width:54ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 
 /* ---- layout ---- */
-main{max-width:1240px;margin:0 auto;padding:26px 30px 48px}
+main{max-width:1240px;margin:0 auto;padding:28px 30px 52px}
 
-/* ---- KPI summary bar (segmented strip, not cards) ---- */
+/* ---- KPI strip: one glass slab, segments divided by hairlines ---- */
 .kpis{
   display:flex;flex-wrap:wrap;align-items:stretch;
-  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--glass),var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);box-shadow:var(--shadow);
   margin-bottom:26px;overflow:hidden;
 }
 .kpi{
-  display:flex;flex-direction:column;gap:5px;padding:13px 22px;
+  display:flex;flex-direction:column;gap:6px;padding:15px 22px;
   border-right:1px solid var(--line);min-width:118px;
 }
 .kpi:last-child{border-right:none;margin-left:auto;text-align:right;align-items:flex-end}
-.kpi-num{font-size:21px;font-weight:600;color:var(--ink);letter-spacing:-.01em;line-height:1}
-.kpi-lab{font-size:11.5px;color:var(--muted)}
+.kpi-num{font-size:23px;font-weight:700;color:var(--ink);letter-spacing:-.02em;line-height:1}
+.kpi-lab{font-size:11px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
 .kpi-lab.ok{color:var(--ok)}
 .kpi-lab.warn{color:var(--warn)}
 .kpi-lab.incomplete{color:var(--incomplete)}
 .kpi-lab.nort{color:var(--nort)}
-.kpi-lab.act{color:var(--warn);font-weight:600}
+.kpi-lab.act{color:var(--warn);font-weight:650}
 /* Clickable filter chips: the count segments narrow the table + map by status. */
 .kpi-btn{
   appearance:none;border:0;border-right:1px solid var(--line);
-  font:inherit;text-align:left;color:inherit;background:var(--surface);
-  cursor:pointer;transition:background .12s,box-shadow .12s;
+  font:inherit;text-align:left;color:inherit;background:transparent;
+  cursor:pointer;transition:background .18s,box-shadow .18s;position:relative;
 }
-.kpi-btn:hover{background:var(--surface-2)}
-.kpi-btn:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent-soft)}
-.kpi-btn[aria-pressed="true"]{
-  background:var(--accent-soft);box-shadow:inset 0 -2px 0 var(--accent);
-}
+.kpi-btn:hover{background:rgba(56,189,248,.05)}
+.kpi-btn:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent-line)}
+.kpi-btn[aria-pressed="true"]{background:var(--accent-soft)}
+.kpi-btn[aria-pressed="true"]::after{content:"";position:absolute;left:14px;right:14px;
+  bottom:0;height:2px;border-radius:2px;background:var(--grad);
+  box-shadow:0 0 12px rgba(56,189,248,.7)}
 .kpi-static{margin-left:auto;text-align:right;align-items:flex-end}
 
-/* ---- tabs ---- */
-.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line-strong);margin-bottom:22px}
+/* ---- tabs: the active one carries the gradient and a glowing rule ---- */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:24px}
 .tab{
   appearance:none;background:none;border:none;font:inherit;color:var(--muted);
-  font-size:13px;font-weight:550;padding:9px 18px;cursor:pointer;
-  border-bottom:2px solid transparent;margin-bottom:-1px;
+  font-size:13px;font-weight:600;padding:10px 18px 11px;cursor:pointer;position:relative;
+  border-radius:var(--radius-sm) var(--radius-sm) 0 0;transition:color .18s,background .18s;
 }
-.tab:hover{color:var(--text)}
-.tab[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
-.tab .count{font-family:var(--mono);font-size:11px;color:var(--dim);margin-left:7px}
+.tab:hover{color:var(--ink);background:rgba(255,255,255,.025)}
+.tab[aria-selected="true"]{color:var(--ink);background:rgba(56,189,248,.06)}
+.tab[aria-selected="true"]::after{content:"";position:absolute;left:10px;right:10px;
+  bottom:-1px;height:2px;border-radius:2px;background:var(--grad);
+  box-shadow:0 0 14px rgba(56,189,248,.8)}
+.tab:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent-line)}
+.tab .count{font-family:var(--mono);font-size:10.5px;color:var(--accent);margin-left:8px;
+  background:var(--accent-soft);padding:1px 7px;border-radius:999px}
 .panel[hidden]{display:none}
 
 /* ---- toolbar ---- */
 .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .filter{
-  background:var(--surface);border:1px solid var(--line-strong);color:var(--text);
-  font:inherit;font-size:13px;padding:7px 12px;border-radius:var(--radius-sm);min-width:240px;
+  background:var(--surface);border:1px solid var(--line-strong);color:var(--ink);
+  font:inherit;font-size:13px;padding:8px 13px;border-radius:var(--radius-sm);min-width:240px;
+  transition:border-color .18s,box-shadow .18s;
 }
 .filter::placeholder{color:var(--dim)}
-.filter:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.filter:focus-visible{outline:none;border-color:var(--accent);box-shadow:var(--glow)}
 .btn{
-  background:var(--surface);border:1px solid var(--line-strong);color:var(--text);
-  font:inherit;font-size:13px;font-weight:550;padding:7px 14px;border-radius:var(--radius-sm);cursor:pointer;
+  background:var(--glass),var(--surface);border:1px solid var(--line-strong);color:var(--text);
+  font:inherit;font-size:13px;font-weight:600;padding:8px 15px;border-radius:var(--radius-sm);
+  cursor:pointer;transition:border-color .18s,color .18s,box-shadow .18s;
 }
-.btn:hover{border-color:var(--accent);color:var(--accent)}
-.btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent-soft)}
+.btn:hover{border-color:var(--accent);color:var(--ink);box-shadow:var(--glow)}
+.btn:focus-visible{outline:none;box-shadow:var(--glow)}
 .hint{color:var(--dim);font-size:12px;margin-left:auto}
 .cue{color:var(--accent)}
 
 /* ---- table ---- */
 .grid{
-  width:100%;border-collapse:collapse;background:var(--surface);
+  width:100%;border-collapse:collapse;background:var(--glass),var(--surface);
   border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+  box-shadow:var(--shadow);
 }
 .grid thead th{
-  background:var(--surface-2);text-align:left;
-  font-family:var(--sans);font-size:11.5px;font-weight:600;color:var(--muted);
-  letter-spacing:0;padding:11px 14px;border-bottom:1px solid var(--line-strong);white-space:nowrap;
+  background:rgba(255,255,255,.028);text-align:left;
+  font-family:var(--sans);font-size:10.5px;font-weight:700;color:var(--muted);
+  letter-spacing:.08em;text-transform:uppercase;
+  padding:12px 14px;border-bottom:1px solid var(--line-strong);white-space:nowrap;
 }
 .grid th.num,.grid td.c-num{text-align:right}
 .grid th.sortable{cursor:pointer;user-select:none}
-.grid th.sortable:hover{color:var(--text)}
-.grid th.sort-asc::after{content:" \2191";color:var(--accent)}
-.grid th.sort-desc::after{content:" \2193";color:var(--accent)}
-.grid td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+.grid th.sortable:hover{color:var(--ink)}
+.grid th.sort-asc::after{content:" \\2191";color:var(--accent)}
+.grid th.sort-desc::after{content:" \\2193";color:var(--accent)}
+.grid td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
 .grid tbody tr:last-child td{border-bottom:none}
-.grid tbody tr:hover{background:var(--surface-2)}
+.grid tbody tr{transition:background .15s}
+.grid tbody tr:hover{background:rgba(56,189,248,.045)}
 .prow.has-detail{cursor:pointer}
-.prow.open{background:var(--accent-soft)}
+.prow.open{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
 .prow.open:hover{background:var(--accent-soft)}
 .c-caret{width:22px;color:var(--accent);text-align:center;font-size:11px}
-.c-pid{font-family:var(--mono);font-weight:600;color:var(--ink)}
+.c-pid{font-family:var(--mono);font-weight:650;color:var(--ink)}
 .c-reason{color:var(--muted);font-size:12.5px;max-width:30ch}
 .c-action{color:var(--text);font-size:12.5px;max-width:28ch}
 
-/* ---- verdict tag (sober, NHS/USWDS style) ---- */
+/* ---- verdict tag: a lit pill, the dot glows its own verdict ---- */
 .pill{
-  display:inline-flex;align-items:center;gap:6px;
-  font-size:11.5px;font-weight:600;letter-spacing:.01em;
-  color:color-mix(in srgb,var(--pill) 78%,#101820);
-  background:color-mix(in srgb,var(--pill) 9%,#fff);
-  border:1px solid color-mix(in srgb,var(--pill) 26%,transparent);
-  padding:2px 9px;border-radius:var(--radius-sm);white-space:nowrap;
+  display:inline-flex;align-items:center;gap:7px;
+  font-size:11px;font-weight:700;letter-spacing:.04em;
+  color:color-mix(in srgb,var(--pill) 84%,var(--mix-down));
+  background:color-mix(in srgb,var(--pill) 13%,var(--mix-up));
+  border:1px solid color-mix(in srgb,var(--pill) 36%,transparent);
+  padding:3px 10px 3px 9px;border-radius:999px;white-space:nowrap;
 }
-.pill::before{content:"";width:7px;height:7px;border-radius:2px;background:var(--pill);flex:none}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--pill);
+  flex:none;box-shadow:0 0 8px var(--pill)}
 .tag.frag{
   margin-left:8px;font-size:10.5px;color:var(--warn);
   border:1px solid color-mix(in srgb,var(--warn) 38%,transparent);
-  padding:1px 6px;border-radius:var(--radius-sm);
+  padding:1px 7px;border-radius:999px;
 }
 
 /* ---- data-presence strip (CT STR PLAN DOSE / GTV CTV PTV) ---- */
@@ -714,15 +769,16 @@ main{max-width:1240px;margin:0 auto;padding:26px 30px 48px}
   min-width:38px;padding:3px 4px;border-radius:var(--radius-sm);line-height:1.15;
   border:1px solid var(--line-strong);background:var(--surface-2);
 }
-.pcell .pmark{font-size:11px;font-weight:600;color:var(--muted)}
-.pcell .plabel{font-size:8.5px;letter-spacing:.02em;color:var(--muted)}
-.pcell.on{background:#f0f6f1;border-color:#cce0d2}
-.pcell.on .pmark{color:var(--ok)}
-.pcell.on .plabel{color:#43684f}
-.pcell.off{background:var(--surface);border:1px dashed var(--line-strong)}
+.pcell .pmark{font-size:11px;font-weight:700;color:var(--muted)}
+.pcell .plabel{font-size:8.5px;letter-spacing:.05em;color:var(--muted)}
+.pcell.on{background:color-mix(in srgb,var(--ok) 12%,var(--mix-up));
+  border-color:color-mix(in srgb,var(--ok) 40%,transparent)}
+.pcell.on .pmark{color:var(--ok);text-shadow:0 0 8px color-mix(in srgb,var(--ok) 60%,transparent)}
+.pcell.on .plabel{color:color-mix(in srgb,var(--ok) 70%,var(--mix-down))}
+.pcell.off{background:transparent;border:1px dashed var(--line-strong)}
 .pcell.off .pmark{color:var(--absent)}
 .pcell.off .plabel{color:var(--dim)}
-/* The fifth cell (GTV) starts the target group — a hair more separation. */
+/* The fifth cell (GTV) starts the target group - a hair more separation. */
 .pcell:nth-child(5){margin-left:8px}
 .presence.detailed{gap:5px;flex-wrap:wrap}
 .presence.detailed .pcell{min-width:50px;padding:7px 8px}
@@ -731,8 +787,8 @@ main{max-width:1240px;margin:0 auto;padding:26px 30px 48px}
 
 /* ---- drill-down detail ---- */
 .detail{
-  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius);
-  margin:2px 0 8px;padding:16px 18px;
+  background:rgba(5,9,18,.55);border:1px solid var(--line);border-radius:var(--radius);
+  margin:4px 0 10px;padding:18px 20px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
 }
 .detail-summary{
   display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));
@@ -742,37 +798,39 @@ main{max-width:1240px;margin:0 auto;padding:26px 30px 48px}
    one wrapping paragraph of bold labels. The left edge carries the kind of fact. */
 .detail-meta{
   display:flex;flex-direction:column;gap:7px;font-size:12.5px;
-  background:var(--surface);border:1px solid var(--line);
+  background:var(--glass),var(--surface);border:1px solid var(--line);
   border-left:3px solid var(--line-strong);border-radius:var(--radius-sm);
-  padding:9px 12px 11px;
+  padding:10px 13px 12px;
 }
 .detail-meta.wide{grid-column:1/-1}
-.detail-meta.issue{border-left-color:var(--incomplete)}
-.detail-meta.act{border-left-color:var(--ok)}
-.detail-meta>b{color:var(--muted);font-weight:700;font-size:10px;letter-spacing:.07em;text-transform:uppercase}
+.detail-meta.issue{border-left-color:var(--incomplete);
+  background:linear-gradient(90deg,color-mix(in srgb,var(--incomplete) 8%,transparent),transparent 60%),var(--surface)}
+.detail-meta.act{border-left-color:var(--ok);
+  background:linear-gradient(90deg,color-mix(in srgb,var(--ok) 8%,transparent),transparent 60%),var(--surface)}
+.detail-meta>b{color:var(--muted);font-weight:700;font-size:10px;letter-spacing:.1em;text-transform:uppercase}
 .dm-body{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;color:var(--text);line-height:1.55}
 .detail-meta.wide .dm-body{flex-direction:column;align-items:flex-start;gap:7px}
-.dm-big{font-size:17px;font-weight:700;color:var(--ink)}
-.detail-title{font-size:11px;font-weight:650;color:var(--dim);letter-spacing:.04em;
+.dm-big{font-size:18px;font-weight:750;color:var(--ink)}
+.detail-title{font-size:10.5px;font-weight:700;color:var(--accent);letter-spacing:.1em;
   text-transform:uppercase;margin-bottom:12px}
 .study{padding:11px 0;border-top:1px solid var(--line)}
 .study:first-of-type{border-top:none;padding-top:2px}
 .study-head{display:flex;align-items:baseline;gap:12px;margin-bottom:6px;font-size:12.5px}
-.study-date{font-weight:600;color:var(--ink)}
+.study-date{font-weight:650;color:var(--ink)}
 .study-type{color:var(--muted);font-size:12px}
-/* Imaging-only studies (no RT object) are de-emphasised — informational, not actionable. */
+/* Imaging-only studies (no RT object) are de-emphasised - informational, not actionable. */
 .study-nort{opacity:.7}
 .study-nort .study-date{color:var(--muted)}
-.ok-note{color:#43684f;font-size:12.5px}
+.ok-note{color:var(--ok);font-size:12.5px}
 .findings{list-style:none;display:flex;flex-direction:column;gap:7px}
 .findings li{display:flex;align-items:baseline;gap:8px;font-size:12.5px}
-.badge{font-size:10px;font-weight:600;padding:1px 7px;border-radius:var(--radius-sm);flex:none}
-.sev-error{color:var(--incomplete);background:color-mix(in srgb,var(--incomplete) 9%,#fff);
-  border:1px solid color-mix(in srgb,var(--incomplete) 26%,transparent)}
-.sev-warning{color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,#fff);
-  border:1px solid color-mix(in srgb,var(--warn) 28%,transparent)}
+.badge{font-size:10px;font-weight:700;padding:1px 8px;border-radius:999px;flex:none;letter-spacing:.03em}
+.sev-error{color:var(--incomplete);background:color-mix(in srgb,var(--incomplete) 12%,var(--mix-up));
+  border:1px solid color-mix(in srgb,var(--incomplete) 34%,transparent)}
+.sev-warning{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,var(--mix-up));
+  border:1px solid color-mix(in srgb,var(--warn) 34%,transparent)}
 .sev-info{color:var(--accent);background:var(--accent-soft);
-  border:1px solid color-mix(in srgb,var(--accent) 24%,transparent)}
+  border:1px solid color-mix(in srgb,var(--accent) 30%,transparent)}
 .badge.conf{color:var(--dim);border:1px solid var(--line-strong)}
 .ftext{color:var(--text)}
 
@@ -783,15 +841,15 @@ main{max-width:1240px;margin:0 auto;padding:26px 30px 48px}
 .pct{font-family:var(--mono);font-size:11.5px;color:var(--muted);min-width:42px;text-align:right}
 .legend{display:flex;flex-wrap:wrap;gap:7px 18px;margin:10px 0 14px;font-size:12px}
 .leg{display:inline-flex;align-items:center;gap:6px}
-.sw{width:12px;height:12px;border-radius:2px;border:1px solid var(--line-strong);flex:none}
-.leg b{font-weight:600;font-size:11.5px}
+.sw{width:12px;height:12px;border-radius:3px;border:1px solid var(--line-strong);flex:none}
+.leg b{font-weight:650;font-size:11.5px}
 
 /* ---- section heading / plot / note ---- */
 .section-title{font-size:13.5px;font-weight:650;color:var(--ink);margin:24px 0 12px}
 .maphint{margin:0 0 12px;color:var(--muted);font-size:12.5px}
 .plot{
-  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
-  padding:10px;margin-bottom:18px;overflow:hidden;
+  background:var(--glass),var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:12px;margin-bottom:18px;overflow:hidden;box-shadow:var(--shadow);
 }
 .note{
   color:var(--muted);padding:16px 18px;background:var(--surface);
@@ -801,7 +859,7 @@ main{max-width:1240px;margin:0 auto;padding:26px 30px 48px}
 /* ---- footer ---- */
 footer{
   color:var(--dim);font-size:11.5px;text-align:center;
-  padding:26px 20px 40px;border-top:1px solid var(--line);margin-top:26px;line-height:1.7;
+  padding:28px 20px 44px;border-top:1px solid var(--line);margin-top:28px;line-height:1.7;
 }
 footer b{color:var(--muted)}
 
@@ -811,6 +869,7 @@ footer b{color:var(--muted)}
 /* ---- responsive ---- */
 @media (max-width:760px){
   main{padding:16px}
+  .topbar{padding:12px 16px}
   .kpi{min-width:50%;border-right:none}
   .kpi:last-child{margin-left:0;text-align:left;align-items:flex-start}
   .hint{display:none}
@@ -818,11 +877,14 @@ footer b{color:var(--muted)}
 }
 
 /* ---- the cohort gap block: the one thing on this tab that is not per-patient ---- */
-.gapblock{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
-  padding:15px 17px 17px;margin-bottom:18px;border-left:3px solid var(--incomplete)}
-.gaph{margin:0 0 7px;font-size:17px;font-weight:700;color:var(--incomplete);
-  letter-spacing:-.011em;display:flex;align-items:center;gap:9px}
-.gaph::before{content:'';width:4px;height:17px;border-radius:2px;background:var(--incomplete)}
+.gapblock{background:linear-gradient(135deg,color-mix(in srgb,var(--incomplete) 7%,transparent),transparent 45%),
+  var(--glass),var(--surface);
+  border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);
+  padding:17px 19px 19px;margin-bottom:20px;border-left:3px solid var(--incomplete)}
+.gaph{margin:0 0 7px;font-size:17px;font-weight:750;color:var(--incomplete);
+  letter-spacing:-.012em;display:flex;align-items:center;gap:10px}
+.gaph::before{content:'';width:4px;height:18px;border-radius:2px;background:var(--incomplete);
+  box-shadow:0 0 12px var(--incomplete)}
 .gaplede{margin:0 0 12px;font-size:12.5px;color:var(--muted);line-height:1.65}
 .gapblock .gaptable{margin-bottom:0}
 /* The follow-up badge sits under its chips: the chips say what is missing, the badge says
@@ -830,7 +892,8 @@ footer b{color:var(--muted)}
 .c-fustat{margin-top:3px}
 
 /* A patient the protocol grades but the RT index never listed must be named, not dropped. */
-.orphan-note{background:#fdf6e9;border:1px solid #e7d4ae;border-left:3px solid var(--warn);
+.orphan-note{background:color-mix(in srgb,var(--warn) 9%,var(--mix-up));
+  border:1px solid color-mix(in srgb,var(--warn) 32%,transparent);border-left:3px solid var(--warn);
   border-radius:var(--radius-sm);padding:10px 13px;margin:0 0 14px;font-size:12px;
   color:var(--text);line-height:1.6}
 .orphan-note b{color:var(--warn)}
@@ -1100,9 +1163,9 @@ def render_cohort_report(rt_study_df: pd.DataFrame,
 
     # The overview opens the report. A reader who lands on a work queue has no way to check
     # that the queue is about the cohort they meant; this tab answers that first, and grades
-    # nothing. It borrows the unplaceable-patient count from comp_long rather than deriving
-    # its own, so the front page and the completeness tab cannot disagree about it.
-    overview = cohort_overview(table, manifest, comp_long, kpis["verdicts"])
+    # nothing. Its verdict pie draws build_kpis' own counts rather than deriving its own, so
+    # the front page and the integrity tab cannot disagree about them.
+    overview = cohort_overview(table, manifest, kpis["verdicts"])
 
     page = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
