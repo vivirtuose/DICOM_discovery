@@ -737,3 +737,53 @@ def test_a_modality_missing_at_several_visits_is_one_issue():
         {"timepoint": tp, "items": [{"modality": "MR", "state": "MISSING"}]}
         for tp in ("baseline", "M3", "M6", "M12")]}
     assert patient_issues({"reason": ""}, fu) == ["MR missing at baseline, M3, M6, M12"]
+
+
+def test_the_integrity_csv_loads_as_a_typed_tidy_table(rendered_html, tmp_path):
+    """The exported CSV must be usable in pandas / R without hand-parsing.
+
+    Runs the report's own csvCell function (extracted from the page, run in Node) over the
+    page's own embedded payload, then reads the result with pandas: one row per patient, one
+    variable per column, booleans as bool, counts as int, completeness as float, undefined
+    values as missing rather than as a misleading 100.
+    """
+    import io
+    import json
+    import re
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is needed to run the page's own export code")
+    html_text, _ = rendered_html
+    payload = re.search(r'<script type="application/json" id="rt-data">(.*?)</script>',
+                        html_text, re.S).group(1)
+    cell_fn = re.search(r"function csvCell\(v\)\{.*?\n  \}", html_text, re.S).group(0)
+    js = (cell_fn + "\nconst data = " + payload + ";\n"
+          "const lines=[data.columns.join(',')];\n"
+          "data.records.forEach(r=>lines.push(data.columns.map(c=>csvCell(r[c])).join(',')));\n"
+          "process.stdout.write(lines.join(String.fromCharCode(10))+String.fromCharCode(10));")
+    script = tmp_path / "export.js"
+    script.write_text(js, encoding="utf-8")
+    csv = subprocess.run([node, str(script)], capture_output=True, text=True,
+                         encoding="utf-8", check=True).stdout
+
+    df = pd.read_csv(io.StringIO(csv))
+    data = json.loads(payload.replace("<\/", "</"))
+    assert list(df.columns) == data["columns"]
+    assert df["patient_id"].is_unique and len(df) == len(data["records"])
+    assert df["has_RTDOSE"].dtype == bool and df["fragmented"].dtype == bool
+    assert str(df["n_studies"].dtype).startswith("int")
+    assert df["fu_pct_complete"].dtype == float
+    assert set(df["rt_status"]) <= {"OK", "WARN", "INCOMPLETE", "NO_RT"}
+    assert set(df["fu_status"]) <= {"complete", "incomplete", "nothing_expected",
+                                    "ungradeable", "not_graded"}
+    fu_cols = [c for c in df.columns if c.startswith("fu_") and c.count("_") >= 2
+               and c.split("_")[1] not in ("n", "pct", "status")]
+    assert fu_cols, "no per-visit follow-up columns"
+    for c in fu_cols:
+        assert set(df[c].dropna()) <= {"PRESENT", "MISSING", "EXTRA", "UNMAPPED"}, c
+    assert not any(ch in csv for ch in "✓✗—"), "a display glyph reached the CSV"
+    assert (df["n_issues"] == df["issues"].fillna("").map(
+        lambda s: len([x for x in s.split("; ") if x]))).all()

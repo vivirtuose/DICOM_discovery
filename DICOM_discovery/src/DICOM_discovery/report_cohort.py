@@ -24,9 +24,10 @@ HTML.
 from __future__ import annotations
 
 import html
+import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -454,6 +455,88 @@ def _issues_html(issues: List[str]) -> str:
     return "<ul class='issues'>" + "".join(f"<li>{_esc(i)}</li>" for i in issues) + "</ul>"
 
 
+def _followup_status(fu: Optional[dict]) -> str:
+    if not fu:
+        return "not_graded"
+    cells = fu.get("cells") or []
+    n_expected = int(fu.get("n_expected", 0) or 0)
+    if cells and n_expected == 0 and all(str(c.get("state")) == "UNMAPPED" for c in cells):
+        return "ungradeable"
+    if n_expected == 0:
+        return "nothing_expected"
+    return "incomplete" if int(fu.get("n_missing", 0) or 0) else "complete"
+
+
+def export_table(rows: List[dict], followup: Dict[str, dict],
+                 timepoints: List[str]) -> Tuple[List[str], List[dict]]:
+    """The integrity queue as a tidy table: one row per patient, one variable per column.
+
+    The CSV used to be scraped from what the page displays - glyph strips ("✓CT✓STR—DOSE"),
+    a verdict cell that sometimes read "WARN fragmented", follow-up as a sentence, and no
+    numeric column at all. None of it could be loaded into pandas or R without hand-parsing.
+    This is built from the data instead, so every column has one meaning and one type:
+
+    * identifiers and categories in snake_case (``rt_status``, ``fu_status``);
+    * booleans as ``true`` / ``false``;
+    * counts as integers, ``fu_pct_complete`` as a float - empty where it is undefined
+      (nothing expected, or ungradeable), never a misleading 100;
+    * one ``fu_<timepoint>_<modality>`` column per pair the protocol grades, holding
+      PRESENT / MISSING / EXTRA / UNMAPPED, empty when nothing is expected there;
+    * ``issues`` as the only free-text column, ``;``-separated, with ``n_issues`` beside it.
+    """
+    pairs: List[Tuple[str, str]] = []
+    for tp in timepoints:
+        mods = set()
+        for fu in followup.values():
+            for cell in fu.get("cells") or []:
+                if str(cell.get("timepoint")) == tp:
+                    mods.update(str(it["modality"]) for it in cell.get("items") or [])
+        pairs.extend((tp, m) for m in sorted(mods))
+
+    columns = ["patient_id", "rt_status", "fragmented",
+               "has_CT", "has_RTSTRUCT", "has_RTPLAN", "has_RTDOSE",
+               "has_GTV", "has_CTV", "has_PTV",
+               "n_studies", "n_rt_studies", "n_roi_nonstandard",
+               "fu_status", "fu_n_expected", "fu_n_present", "fu_n_missing", "fu_pct_complete"]
+    columns += [f"fu_{tp}_{mod}" for tp, mod in pairs]
+    columns += ["n_issues", "issues"]
+
+    records = []
+    for r in rows:
+        pid = r["patient_id"]
+        fu = followup.get(pid)
+        status = _followup_status(fu)
+        rec = {"patient_id": pid, "rt_status": r["rt_status"], "fragmented": r["fragmented"]}
+        for (key, _label), present in zip(_CHAIN, r["chain"]):
+            rec[key] = present
+        for t in ("GTV", "CTV", "PTV"):
+            rec[f"has_{t}"] = r["targets"][t]
+        rec.update(n_studies=r["n_studies"], n_rt_studies=r["n_rt_studies"],
+                   n_roi_nonstandard=r["n_roi_nonstandard"], fu_status=status)
+        graded = status in ("complete", "incomplete")
+        rec["fu_n_expected"] = int(fu["n_expected"]) if graded else None
+        rec["fu_n_present"] = int(fu["n_present"]) if graded else None
+        rec["fu_n_missing"] = int(fu["n_missing"]) if graded else None
+        rec["fu_pct_complete"] = round(float(fu["pct_complete"]), 1) if graded else None
+        states = {}
+        for cell in (fu or {}).get("cells") or []:
+            for it in cell.get("items") or []:
+                states[(str(cell.get("timepoint")), str(it["modality"]))] = str(it["state"])
+        for tp, mod in pairs:
+            rec[f"fu_{tp}_{mod}"] = states.get((tp, mod))
+        issues = patient_issues(r, fu)
+        rec["n_issues"] = len(issues)
+        rec["issues"] = "; ".join(issues)
+        records.append(rec)
+    return columns, records
+
+
+def _export_json(columns: List[str], records: List[dict]) -> str:
+    """The export payload, safe to inline in a <script> element."""
+    payload = json.dumps({"columns": columns, "records": records}, ensure_ascii=True)
+    return payload.replace("</", "<\\/")
+
+
 def followup_only_patients(rows: List[dict], followup: Dict[str, dict]) -> List[str]:
     """Patients the protocol grades that the RT table has no row for.
 
@@ -590,7 +673,9 @@ def _rt_table_html(rows: List[dict], findings: Dict[str, List[dict]],
             f"have no row below</b> - the RT index does not list them: "
             f"<span class='mono'>{shown}{more}</span>. Their follow-up is in the gap table "
             f"above; their RT chain was never assessed.</p>")
-    return f"""{orphan_note}<div class="toolbar">
+    columns, records = export_table(rows, followup, timepoints)
+    return f"""{orphan_note}<script type="application/json" id="rt-data">{_export_json(columns, records)}</script>
+<div class="toolbar">
   <input type="search" id="rt-filter" class="filter" placeholder="Filter patients…"
          aria-label="filter RT table">
   <button type="button" class="btn" id="rt-export">Export CSV</button>
@@ -1106,8 +1191,37 @@ def _script() -> str:
     // after click can abort the download before it starts in some browsers (notably Firefox).
     setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
   }
+  // The integrity export is built from the tidy payload, not scraped from the display: one
+  // row per patient currently shown (the filter applies), one typed variable per column.
+  function csvCell(v){
+    if(v === null || v === undefined) return '';
+    if(v === true) return 'true';
+    if(v === false) return 'false';
+    var t = String(v);
+    return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  }
+  function exportTidy(filename){
+    var node = document.getElementById('rt-data'), table = document.getElementById('rt-table');
+    if(!node || !table){ exportCsv('rt-table', filename); return; }
+    var data = JSON.parse(node.textContent), shown = {};
+    table.querySelectorAll('tbody tr.prow').forEach(function(tr){
+      if(!tr.hidden) shown[tr.getAttribute('data-pid')] = true;
+    });
+    var lines = [data.columns.join(',')];
+    data.records.forEach(function(rec){
+      if(!shown[rec.patient_id]) return;
+      lines.push(data.columns.map(function(c){ return csvCell(rec[c]); }).join(','));
+    });
+    // UTF-8 BOM so Excel reads accents; pandas and R strip it on read.
+    var blob = new Blob(['\ufeff' + lines.join('\n') + '\n'], {type:'text/csv;charset=utf-8;'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename; a.rel = 'noopener';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
+  }
   var rtExp = document.getElementById('rt-export');
-  if(rtExp) rtExp.addEventListener('click', function(){ exportCsv('rt-table','rt_integrity.csv'); });
+  if(rtExp) rtExp.addEventListener('click', function(){ exportTidy('rt_integrity.csv'); });
 
   // ---- cohort map: narrow the plotted points to a set of patients ----
   var MAP_ORIG = null, MAP_ALLPIDS = null;
